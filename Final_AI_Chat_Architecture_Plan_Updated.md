@@ -5,15 +5,15 @@
 This version includes the final decisions and refinements discussed:
 
 - Supabase Auth for authentication
-- Brave Search API for URL discovery
+- Tavily Search API for URL discovery and LLM-ready search snippets
 - Custom web retrieval pipeline, not built-in SDK browsing
 - PostgreSQL + pgvector for persistent storage and semantic retrieval
-- 768-dimensional embeddings using `BAAI/bge-base-en-v1.5`
+- 768-dimensional remote embeddings using an OpenAI-compatible embeddings API
 - LangGraph-based controlled agent orchestration
 - SSE streaming with reasoning/status updates and final answer deltas
 - Context compression and prompt budgeting
 - Chat summarization layer
-- Background processing plan
+- Celery + Redis background processing plan for document ingestion and embeddings
 - Security, observability, failure handling, and scaling strategy
 
 ---
@@ -39,7 +39,7 @@ The architecture is optimized around the highest-priority evaluation areas:
 |---|---:|---|
 | Cross-chat contextual retrieval | 30% | Workspace-scoped pgvector memory retrieval with citations |
 | Streaming reasoning implementation | 20% | SSE status/reasoning stream + final answer stream |
-| Real-time web connectivity | 20% | Brave Search + custom fetch/extract/rank/cite pipeline |
+| Real-time web connectivity | 20% | Tavily Search + custom rank/rerank/compress/cite pipeline |
 | Code quality and architecture | 15% | Monorepo, layered services, LangGraph orchestration |
 | UI/UX polish | 10% | Next.js + Shadcn workspace dashboard and streaming chat UI |
 | Documentation and rationale | 5% | Architecture, retrieval, streaming, auth, and cost docs |
@@ -65,7 +65,7 @@ Intent Router
         ↓
 Retrieval Layer
    ├── Workspace semantic memory via PostgreSQL + pgvector
-   └── Live web search via Brave Search + custom fetch/extract/rank pipeline
+   └── Live web search via Tavily Search + custom rank/rerank/citation pipeline
         ↓
 Reranker
         ↓
@@ -110,7 +110,7 @@ Intent Router
 └──────────────────────────┘
  ↓
 ┌──────────────────────────┐
-│ Brave Web Retrieval      │
+│ Tavily Web Retrieval     │
 └──────────────────────────┘
  ↓
 Reranker
@@ -141,7 +141,7 @@ sequenceDiagram
     participant API as FastAPI
     participant LG as LangGraph
     participant MEM as pgvector Memory
-    participant WEB as Brave + Web Fetcher
+    participant WEB as Tavily + Web Fetcher
     participant PB as Prompt Builder
     participant LLM as OpenRouter
     participant DB as PostgreSQL
@@ -173,7 +173,7 @@ sequenceDiagram
 |---|---|---|
 | Multi-workspace architecture | Yes | `workspaces`, `chat_sessions`, `messages` with workspace isolation |
 | Workspace visual distinction | Yes | Workspace name, color, icon in UI |
-| Real-time web responses | Yes | Brave Search + custom retrieval pipeline |
+| Real-time web responses | Yes | Tavily Search + custom retrieval pipeline |
 | No built-in SDK browsing plugin | Yes | Backend performs fetch, extraction, ranking, citations manually |
 | Agentic framework | Yes | LangGraph |
 | Streaming token-by-token | Yes | SSE answer delta events |
@@ -184,8 +184,8 @@ sequenceDiagram
 | Semantic retrieval, not hardcoded | Yes | 768-dimensional embeddings |
 | Cross-chat citations | Yes | Retrieved chunks include chat/message metadata |
 | OpenRouter usage | Yes | OpenAI SDK with OpenRouter base URL |
-| Cost strategy | Yes | Model routing, local embeddings, Redis cache, usage logs |
-| Hosted product | Yes | Vercel + Render/Railway + Supabase + Upstash |
+| Cost strategy | Yes | Model routing, batched remote embeddings, Redis cache, usage logs |
+| Hosted product | Yes | Vercel + Render + Supabase + Upstash |
 
 ---
 
@@ -261,7 +261,7 @@ Backend responsibilities:
 - LangGraph execution
 - Tool execution
 - Usage logging
-- Brave Search retrieval
+- Tavily Search retrieval
 - Semantic memory retrieval
 
 ---
@@ -358,7 +358,7 @@ Why Redis:
 
 - Very fast
 - Simple to use
-- Helps reduce OpenRouter and Brave Search usage
+- Helps reduce OpenRouter and Tavily usage
 - Improves latency
 - Protects against accidental cost spikes
 
@@ -436,22 +436,22 @@ This allows development with a personal OpenAI key while deploying with OpenRout
 
 ---
 
-### 5.10 Brave Search API
+### 5.10 Tavily Search API
 
-Brave Search is used for URL discovery in the custom web retrieval pipeline.
+Tavily Search is used for URL discovery and clean search snippets in the custom web retrieval pipeline.
 
 Important distinction:
 
 The project does not use built-in LLM browsing plugins.
 
-Brave Search is only used to discover candidate URLs. The backend still performs custom retrieval:
+Tavily is used to discover candidate URLs and provide LLM-friendly source snippets. The backend still owns retrieval decisions:
 
 ```text
-Brave Search API
+Tavily Search API
         ↓
-Candidate URLs
+Candidate URLs and snippets
         ↓
-Backend fetches pages manually
+Backend optionally fetches pages manually
         ↓
 Backend extracts readable text
         ↓
@@ -477,10 +477,10 @@ The architecture separates model responsibilities to optimize latency and cost.
 | Chat title generation | Gemini Flash Lite or similar cheap OpenRouter model | Small output requirement |
 | Final answer generation | GPT-4o Mini through OpenRouter | Strong quality-to-cost ratio |
 | Backup generation model | Claude Haiku or another low-cost reliable model | Fallback reliability |
-| Embeddings | `BAAI/bge-base-en-v1.5` | Local 768-dimensional embeddings |
-| Future reranking | `bge-reranker-base` | Better semantic ranking if needed |
+| Embeddings | `text-embedding-3-small` or `openai/text-embedding-3-small` | Remote 768-dimensional embeddings that match pgvector schema without loading local model weights |
+| Future reranking | Lightweight deterministic reranker by default; optional cross-encoder only on larger workers | Avoids memory spikes on Render starter-sized workers |
 
-This architecture preserves most of the OpenRouter budget for final answer generation rather than spending it on embeddings and routing.
+This architecture prioritizes deployment stability over fully local embeddings. Remote batched embeddings add a small provider cost, but they avoid loading a sentence-transformer/PyTorch stack into the API or Celery worker.
 
 ---
 
@@ -662,10 +662,10 @@ ON messages(workspace_id, role, created_at DESC);
 
 ### 8.5 message_embeddings
 
-The chosen embedding model is:
+The production embedding model is:
 
 ```text
-BAAI/bge-base-en-v1.5
+text-embedding-3-small
 ```
 
 Dimension:
@@ -673,6 +673,14 @@ Dimension:
 ```text
 768
 ```
+
+When routed through OpenRouter, use:
+
+```text
+openai/text-embedding-3-small
+```
+
+The application uses an OpenAI-compatible remote embeddings client. `EMBEDDING_PROVIDER=openai` means "OpenAI-compatible API", so it can point either to direct OpenAI or to OpenRouter by changing `EMBEDDING_BASE_URL`.
 
 Schema:
 
@@ -846,7 +854,13 @@ source_type = 'document'
 ### Chosen Model
 
 ```text
-BAAI/bge-base-en-v1.5
+text-embedding-3-small
+```
+
+OpenRouter model slug:
+
+```text
+openai/text-embedding-3-small
 ```
 
 ### Dimension
@@ -873,7 +887,7 @@ BAAI/bge-base-en-v1.5
 - Lower latency and storage than 1536
 - Good support for chat memory and future document upload
 - Practical for pgvector + HNSW
-- Local embedding possible, reducing API costs
+- Remote embedding avoids Render worker memory spikes from local model weights
 
 ### Storage Comparison
 
@@ -1036,7 +1050,7 @@ Summarize when chat becomes inactive
 
 ---
 
-## 13. Web Retrieval Strategy Using Brave Search
+## 13. Web Retrieval Strategy Using Tavily Search
 
 The requirement says real-time web connectivity is required and inbuilt SDK browsing plugins must not be used.
 
@@ -1051,7 +1065,7 @@ Do not use:
 
 ### What We Use
 
-Use Brave Search only for URL discovery.
+Use Tavily for URL discovery and search snippets.
 
 Custom pipeline:
 
@@ -1060,7 +1074,7 @@ User query
         ↓
 Intent router decides web is needed
         ↓
-Brave Search API retrieves candidate URLs
+Tavily Search retrieves candidate URLs and snippets
         ↓
 Backend fetches pages using httpx
         ↓
@@ -1107,7 +1121,7 @@ Cache TTL: 15 minutes
 
 If page fetch fails:
 
-1. Use Brave snippet
+1. Use Tavily snippet
 2. Try next URL
 3. Return partial sources
 4. Tell the user live retrieval was limited
@@ -1368,20 +1382,31 @@ This keeps the chat experience responsive while expensive tasks execute asynchro
 
 The OpenRouter key has a hard cap, so cost control is mandatory.
 
-### Use Local Embeddings
+### Use Remote Batched Embeddings
 
 Embedding model:
 
 ```text
-BAAI/bge-base-en-v1.5
+text-embedding-3-small
 ```
 
 Benefits:
 
-- No embedding API cost
-- No OpenRouter spend for embeddings
-- No OpenAI embedding dependency
-- Better control over latency
+- No sentence-transformer or PyTorch model weights in the API/worker process
+- Lower Render memory pressure during document ingestion
+- Same `vector(768)` schema without a pgvector migration
+- Provider flexibility through OpenAI-compatible base URLs
+
+OpenRouter-compatible configuration:
+
+```env
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=your_openrouter_key
+EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+EMBEDDING_MODEL=openai/text-embedding-3-small
+EMBEDDING_DIMENSIONS=768
+EMBEDDING_BATCH_SIZE=24
+```
 
 ### Model Routing
 
@@ -1453,7 +1478,7 @@ Optimizations:
 
 - Start SSE immediately
 - Run memory retrieval and web retrieval in parallel when both are needed
-- Use local embeddings
+- Use remote batched embeddings to avoid local model memory spikes
 - Cache web results
 - Limit web pages to 3
 - Keep retrieved memory to top 5
@@ -1503,7 +1528,7 @@ Environment variables:
 ```text
 OPENROUTER_API_KEY
 SUPABASE_SERVICE_ROLE_KEY
-BRAVE_SEARCH_API_KEY
+TAVILY_API_KEY
 REDIS_URL
 DATABASE_URL
 ```
@@ -1529,7 +1554,7 @@ This prevents abuse and accidental budget exhaustion.
 Fallback:
 
 ```text
-Brave Search fails
+Tavily Search fails
         ↓
 Use cached result if available
         ↓
@@ -1545,7 +1570,7 @@ Fallback:
 ```text
 Fetch URL fails
         ↓
-Use Brave snippet
+Use Tavily snippet
         ↓
 Try next URL
 ```
@@ -1618,7 +1643,7 @@ Track:
 - Number of retrieved chunks
 - Streaming errors
 - OpenRouter errors
-- Brave Search errors
+- Tavily Search errors
 
 Tables used:
 
@@ -1707,12 +1732,14 @@ Recommended deployment:
 
 ```text
 Frontend: Vercel
-Backend: Render or Railway
+Backend: Render
+Background Worker: Render Celery worker
 Database: Supabase PostgreSQL + pgvector
 Auth: Supabase Auth
 Redis: Upstash Redis
-Search: Brave Search API
+Search: Tavily Search API
 LLM: OpenRouter
+Embeddings: OpenAI-compatible remote embeddings
 ```
 
 Environment variables:
@@ -1729,11 +1756,18 @@ SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 JWT_SECRET=
 REDIS_URL=
-BRAVE_SEARCH_API_KEY=
+CELERY_BROKER_URL=
+CELERY_RESULT_BACKEND=
+TAVILY_API_KEY=
 LLM_API_KEY=
 LLM_BASE_URL=https://openrouter.ai/api/v1
 DEFAULT_MODEL=openai/gpt-4o-mini
-EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=
+EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+EMBEDDING_MODEL=openai/text-embedding-3-small
+EMBEDDING_DIMENSIONS=768
+EMBEDDING_BATCH_SIZE=24
 ```
 
 Never commit `.env`.
@@ -1757,7 +1791,7 @@ README should include:
 - How to run backend
 - Deployment links
 - OpenRouter setup
-- Brave Search setup
+- Tavily setup
 - Supabase setup
 - Known limitations
 
@@ -1807,12 +1841,12 @@ Build in this order:
 8. Build message persistence
 9. Add FastAPI SSE dummy streaming
 10. Add OpenRouter streaming
-11. Add local 768-dimensional embeddings
+11. Add remote 768-dimensional embeddings
 12. Store message embeddings
 13. Implement cross-chat retrieval
 14. Add citation metadata
-15. Add Brave Search URL discovery
-16. Add webpage fetch/extract/rank
+15. Add Tavily URL discovery and snippets
+16. Add webpage fetch/extract/rank where needed
 17. Add LangGraph orchestration
 18. Add context compression
 19. Add chat summarization
@@ -1827,14 +1861,14 @@ Build in this order:
 ## 31. Known Caveats
 
 - Raw chain-of-thought should not be exposed; stream reasoning summaries/status instead.
-- Brave Search discovers URLs, but the custom backend pipeline performs extraction, ranking, and citation handling.
+- Tavily discovers URLs and snippets, but the backend still owns ranking, reranking, prompt injection, and citation handling.
 - Cross-chat retrieval quality depends on embedding quality, chunking, thresholding, and reranking.
 - OpenRouter model behavior may differ from direct OpenAI API behavior.
 - The $8 cap requires strict usage logging and cost limits.
 - Web scraping may fail on blocked or JavaScript-heavy pages.
 - 768-dimensional embeddings are a balanced choice, not the absolute highest-quality option.
 - Fully autonomous multi-agent loops are intentionally avoided to reduce cost and latency.
-- Background jobs can start with FastAPI BackgroundTasks but should move to Celery if ingestion grows.
+- Document ingestion and embeddings should run in Celery workers with low concurrency and bounded task recycling on Render.
 
 ---
 
@@ -1908,12 +1942,12 @@ Backend: FastAPI
 Agent Framework: LangGraph
 Auth: Supabase Auth
 Database: Supabase PostgreSQL
-Vector Store: pgvector with 768-dimensional BGE embeddings
-Search: Brave Search API + custom retrieval pipeline
+Vector Store: pgvector with 768-dimensional remote embeddings
+Search: Tavily Search API + custom retrieval pipeline
 LLM Gateway: OpenRouter through OpenAI SDK
 Streaming: Server-Sent Events
 Cache/Rate Limit: Redis / Upstash
-Deployment: Vercel + Render/Railway
+Deployment: Vercel + Render API + Render Celery worker
 ```
 
 This architecture directly addresses the assignment’s scoring priorities: cross-chat contextual retrieval, real-time streaming, live web connectivity, clean workspace isolation, cost control, and reliable hosted delivery.

@@ -1,6 +1,6 @@
 # Architecture
 
-The application is a monorepo with a Next.js frontend, FastAPI backend, Supabase Auth, Supabase PostgreSQL with pgvector, Redis, Tavily Search, LangGraph orchestration, and OpenRouter-compatible LLM calls.
+The application is a monorepo with a Next.js frontend, FastAPI backend, Supabase Auth, Supabase PostgreSQL with pgvector, Redis, Tavily Search, LangGraph orchestration, OpenRouter-compatible LLM calls, and OpenAI-compatible remote embeddings.
 
 ## Request Flow
 
@@ -23,7 +23,30 @@ The backend starts the SSE response before retrieval finishes so the UI can show
 - The backend owns auth verification, workspace ownership checks, retrieval, streaming, provider calls, usage logging, and background jobs.
 - PostgreSQL owns durable state and vector search.
 - Redis owns ephemeral state: rate limits, cache, Celery broker/result channels, stream status, and short-lived counters.
-- Background workers own embeddings, summaries, document chunking, document embeddings, usage aggregation, and cache cleanup.
+- Background workers own summaries, document extraction, document chunking, batched remote embeddings, usage aggregation, and cache cleanup.
+
+## Embedding Architecture
+
+Embeddings are generated through an OpenAI-compatible remote API instead of loading `sentence-transformers` in the Render worker. This avoids PyTorch/model-weight memory spikes during document ingestion and keeps small Render instances stable.
+
+Production defaults:
+
+```env
+EMBEDDING_PROVIDER=openai
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=768
+EMBEDDING_BATCH_SIZE=24
+```
+
+When using OpenRouter for embeddings, keep `EMBEDDING_PROVIDER=openai` because it means "OpenAI-compatible client", then set:
+
+```env
+EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+EMBEDDING_MODEL=openai/text-embedding-3-small
+```
+
+The database remains on `vector(768)`, so this change does not require a vector schema migration.
 
 ## Workspace Isolation
 

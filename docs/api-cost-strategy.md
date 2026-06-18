@@ -7,8 +7,21 @@ The architecture assumes a strict OpenRouter budget, so the backend must measure
 - Cheap model: intent routing, title generation, short summaries.
 - Primary model: final answer generation through OpenRouter.
 - Fallback model: one lower-cost backup when the primary model fails.
-- Local model: `BAAI/bge-base-en-v1.5` embeddings to avoid embedding API spend.
-- Optional local reranker: `BAAI/bge-reranker-base` for higher-quality retrieval without LLM reranking calls.
+- Embedding model: `text-embedding-3-small` or `openai/text-embedding-3-small` through an OpenAI-compatible remote embeddings API.
+- Optional reranker: keep the deterministic lightweight reranker by default; only enable heavy cross-encoder reranking on a larger worker.
+
+## Embedding Cost and Memory Decision
+
+The project previously planned local sentence-transformer embeddings. That avoids API spend but loads a PyTorch stack into the worker, which can exhaust memory during document ingestion on small Render instances.
+
+The current production decision is remote batched embeddings:
+
+- no local model weights in API or worker memory;
+- stable document ingestion on small instances;
+- `768` dimensions to match the existing pgvector schema;
+- configurable OpenAI-compatible base URL, so either direct OpenAI or OpenRouter can be used.
+
+Use `EMBEDDING_BATCH_SIZE` to control request and memory pressure. Keep it modest, such as `24`, for Render starter-sized workers.
 
 ## Hard Limits
 
@@ -27,6 +40,7 @@ Redis should hold:
 - per-user request counters;
 - per-workspace request counters;
 - model usage counters;
+- embedding request counters;
 - Tavily query cache;
 - page extraction cache;
 - duplicate in-flight request locks.

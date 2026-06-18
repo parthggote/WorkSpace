@@ -6,10 +6,10 @@ Multi-workspace AI chat application architecture for the June 2026 AI intern scr
 
 - Supabase Auth with backend ownership checks for every workspace, chat, message, document, and retrieval query.
 - Server-Sent Events chat streaming with safe status and reasoning-summary events before final answer deltas.
-- PostgreSQL plus pgvector memory retrieval using 768-dimensional `BAAI/bge-base-en-v1.5` embeddings.
+- PostgreSQL plus pgvector memory retrieval using 768-dimensional remote embeddings.
 - Redis-backed caching, rate limits, cost counters, stream state, and Celery-compatible job brokering.
-- Brave Search URL discovery with custom backend fetching, extraction, ranking, reranking, compression, and citations.
-- Document upload architecture that reuses the same chunking, embedding, reranking, and citation pipeline as chat memory.
+- Tavily-powered web retrieval with backend ranking, reranking, compression, and citations.
+- Document upload architecture that uses Supabase Storage, Celery workers, remote batched embeddings, and the same retrieval/citation pipeline as chat memory.
 - Usage logs, tool calls, background job records, and retrieval run metadata for observability and cost tracking.
 
 ## Repository Shape
@@ -45,11 +45,16 @@ Key backend variables:
 - `REDIS_URL`
 - `CELERY_BROKER_URL`
 - `CELERY_RESULT_BACKEND`
-- `BRAVE_SEARCH_API_KEY`
+- `TAVILY_API_KEY`
 - `LLM_API_KEY`
 - `LLM_BASE_URL`
 - `DEFAULT_MODEL`
+- `EMBEDDING_PROVIDER`
+- `EMBEDDING_API_KEY`
+- `EMBEDDING_BASE_URL`
 - `EMBEDDING_MODEL`
+- `EMBEDDING_DIMENSIONS`
+- `EMBEDDING_BATCH_SIZE`
 - `RERANKER_MODEL`
 
 Key frontend variables:
@@ -86,10 +91,12 @@ The initial schema includes:
 ## Deployment Targets
 
 - Frontend: Vercel
-- Backend: Render or Railway
+- Backend: Render
+- Background worker: Render Celery worker
 - Database/Auth: Supabase
 - Redis: Upstash Redis
-- Search: Brave Search API
+- Search: Tavily
 - LLM Gateway: OpenRouter
+- Embeddings: OpenAI-compatible remote embeddings through OpenAI or OpenRouter
 
 See [docs/deployment.md](docs/deployment.md) for environment separation, migration order, and secret hygiene rules.

@@ -1,3 +1,6 @@
+import os
+import tempfile
+import httpx
 from pathlib import Path
 import asyncio
 import asyncpg
@@ -49,9 +52,33 @@ async def _ingest_document(document_id: str, workspace_id: str, path: str) -> di
 
     pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=1)
     embedding_service = get_embedding_service()
+    
+    suffix = Path(path).suffix.lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        temp_path = tmp.name
+        
     try:
         await pool.execute("UPDATE documents SET status = 'processing', updated_at = now() WHERE id = $1", document_id)
-        text = clean_text_for_postgres(extract_text(path))
+        
+        if path.startswith("Documents/"):
+            headers = {
+                "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                "apikey": settings.supabase_service_role_key
+            }
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{settings.supabase_url}/storage/v1/object/public/{path}", headers=headers, timeout=60.0)
+                if resp.status_code == 404 or resp.status_code == 403:
+                    # Try authenticated download
+                    resp = await client.get(f"{settings.supabase_url}/storage/v1/object/{path}", headers=headers, timeout=60.0)
+                if resp.status_code >= 400:
+                    raise Exception(f"Failed to download document: {resp.status_code} {resp.text}")
+                with open(temp_path, "wb") as f:
+                    f.write(resp.content)
+            
+            text = clean_text_for_postgres(extract_text(temp_path))
+        else:
+            text = clean_text_for_postgres(extract_text(path))
+            
         chunks = chunk_text(text)
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -104,4 +131,9 @@ async def _ingest_document(document_id: str, workspace_id: str, path: str) -> di
         await pool.execute("UPDATE documents SET status = 'failed', error = $2, updated_at = now() WHERE id = $1", document_id, str(exc)[:1000])
         raise
     finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
         await pool.close()

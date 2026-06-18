@@ -13,5 +13,8 @@
   "workspaces": [
     "apps/web",
     "packages/shared"
-  ]
+  ],
+  "dependencies": {
+    "svg-path-bounds": "^1.0.2"
+  }
 }

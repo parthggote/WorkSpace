@@ -1,5 +1,5 @@
-import { ChatWorkbench } from "@/components/chat-workbench";
+import HeroSection from "@/components/ui/hero-section";
 
 export default function Home() {
-  return <ChatWorkbench />;
+  return <HeroSection />;
 }

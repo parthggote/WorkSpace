@@ -7,7 +7,9 @@ import {
   FileText,
   Library,
   LogOut,
+  Menu,
   MessageCircle,
+  PanelRight,
   Settings,
 } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
@@ -59,6 +61,77 @@ import type {
 import { createClient } from "@/lib/supabase/client";
 import { type User } from "@supabase/supabase-js";
 
+type SupportTabsProps = {
+  statuses: StreamStatus[];
+  isStreaming: boolean;
+  hasAnswerStarted: boolean;
+  hasError: boolean;
+  citations: Citation[];
+  documents: WorkspaceDocument[];
+  disabled: boolean;
+  isUploading: boolean;
+  usage: UsageSummary[];
+  onFilesSelected: (files: File[]) => void;
+  onRefreshDocuments: () => void;
+};
+
+function SupportTabs({
+  statuses,
+  isStreaming,
+  hasAnswerStarted,
+  hasError,
+  citations,
+  documents,
+  disabled,
+  isUploading,
+  usage,
+  onFilesSelected,
+  onRefreshDocuments,
+}: SupportTabsProps) {
+  return (
+    <Tabs defaultValue="activity" className="flex h-full min-h-0 flex-col">
+      <TabsList className="grid w-full shrink-0 grid-cols-4 bg-[#f3f3f3]">
+        <TabsTrigger value="activity">Activity</TabsTrigger>
+        <TabsTrigger value="sources" className="gap-1.5">
+          <Library className="h-3.5 w-3.5" aria-hidden />
+          <span className="hidden sm:inline xl:inline">Sources</span>
+        </TabsTrigger>
+        <TabsTrigger value="docs" className="gap-1.5">
+          <FileText className="h-3.5 w-3.5" aria-hidden />
+          <span className="hidden sm:inline xl:inline">Docs</span>
+        </TabsTrigger>
+        <TabsTrigger value="usage" className="gap-1.5">
+          <BarChart3 className="h-3.5 w-3.5" aria-hidden />
+          <span className="hidden sm:inline xl:inline">Usage</span>
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="activity" className="min-h-0 flex-1">
+        <ReasoningPanel
+          statuses={statuses}
+          isStreaming={isStreaming}
+          hasAnswerStarted={hasAnswerStarted}
+          hasError={hasError}
+        />
+      </TabsContent>
+      <TabsContent value="sources" className="min-h-0 flex-1">
+        <CitationsPanel citations={citations} />
+      </TabsContent>
+      <TabsContent value="docs" className="min-h-0 flex-1">
+        <DocumentUpload
+          documents={documents}
+          disabled={disabled}
+          isUploading={isUploading}
+          onFilesSelected={onFilesSelected}
+          onRefresh={onRefreshDocuments}
+        />
+      </TabsContent>
+      <TabsContent value="usage" className="min-h-0 flex-1">
+        <UsagePanel usage={usage} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
 export function ChatWorkbench() {
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
@@ -93,6 +166,8 @@ export function ChatWorkbench() {
   >(null);
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const [profileDialogView, setProfileDialogView] = useState<"menu" | "settings">("menu");
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isMobileToolsOpen, setIsMobileToolsOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [manageName, setManageName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -603,12 +678,22 @@ export function ChatWorkbench() {
 
   return (
     <>
-    <main className="grid h-dvh min-h-0 grid-rows-[64px_minmax(0,1fr)] overflow-hidden bg-[#f4f4f4] text-foreground">
-      <header className="flex min-w-0 items-center justify-between gap-4 border-b border-[#ededed] bg-[#f4f4f4] px-5">
+    <main className="grid h-dvh min-h-0 grid-rows-[56px_minmax(0,1fr)] overflow-hidden bg-[#f4f4f4] text-foreground sm:grid-rows-[64px_minmax(0,1fr)]">
+      <header className="flex min-w-0 items-center justify-between gap-2 border-b border-[#ededed] bg-[#f4f4f4] px-3 sm:gap-4 sm:px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <a href="/" aria-label="Workspace home" className="flex items-center gap-2 mr-1">
-            <img src="/logo.svg" alt="Workspace Logo" className="w-8 h-8 object-contain" />
-            <span className="text-[16px] font-bold tracking-tight">Workspace</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0 md:hidden"
+            aria-label="Open workspace navigation"
+            onClick={() => setIsMobileNavOpen(true)}
+          >
+            <Menu className="h-5 w-5" aria-hidden />
+          </Button>
+          <a href="/" aria-label="Workspace home" className="mr-1 flex min-w-0 items-center gap-2">
+            <img src="/logo.svg" alt="Workspace Logo" className="h-8 w-8 shrink-0 object-contain" />
+            <span className="truncate text-[16px] font-bold tracking-tight">Workspace</span>
           </a>
           <span className="hidden text-muted-foreground sm:inline">/</span>
           <Button variant="ghost" className="hidden h-9 min-w-0 gap-1 px-1 text-[15px] font-semibold sm:inline-flex">
@@ -634,49 +719,63 @@ export function ChatWorkbench() {
         </div>
       </header>
 
-      <div className="grid min-h-0 grid-cols-[320px_minmax(0,1fr)]">
-        <WorkspaceSidebar
-          workspaces={workspaces}
-          activeWorkspaceId={activeWorkspaceId}
-          sessions={visibleSessions}
-          activeChatId={activeSession?.id ?? ""}
-          isLoading={isLoading}
-          onSelectWorkspace={selectWorkspace}
-          onSelectChat={selectChat}
-          onCreateWorkspace={openCreateWorkspaceDialog}
-          onCreateChat={openCreateChatDialog}
-          onEditWorkspace={openEditWorkspaceDialog}
-          onDeleteWorkspace={openDeleteWorkspaceDialog}
-          onEditChat={openEditChatDialog}
-          onDeleteChat={openDeleteChatDialog}
-        />
+      <div className="grid min-h-0 grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="hidden min-h-0 md:block">
+          <WorkspaceSidebar
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+            sessions={visibleSessions}
+            activeChatId={activeSession?.id ?? ""}
+            isLoading={isLoading}
+            onSelectWorkspace={selectWorkspace}
+            onSelectChat={selectChat}
+            onCreateWorkspace={openCreateWorkspaceDialog}
+            onCreateChat={openCreateChatDialog}
+            onEditWorkspace={openEditWorkspaceDialog}
+            onDeleteWorkspace={openDeleteWorkspaceDialog}
+            onEditChat={openEditChatDialog}
+            onDeleteChat={openDeleteChatDialog}
+          />
+        </div>
 
-        <Card className="m-0 grid h-full min-h-0 min-w-0 overflow-hidden rounded-tl-xl border-[#e6e6e6] bg-white shadow-none">
-          <section className="grid h-full min-h-0 min-w-0 grid-rows-[70px_minmax(0,1fr)]">
-            <header className="flex min-w-0 items-center justify-between gap-4 border-b border-[#eeeeee] px-5">
-              <div className="flex min-w-0 items-center gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#f1f1f1]">
+        <Card className="m-0 grid h-full min-h-0 min-w-0 overflow-hidden rounded-none border-[#e6e6e6] bg-white shadow-none md:rounded-tl-xl">
+          <section className="grid h-full min-h-0 min-w-0 grid-rows-[64px_minmax(0,1fr)] sm:grid-rows-[70px_minmax(0,1fr)]">
+            <header className="flex min-w-0 items-center justify-between gap-3 border-b border-[#eeeeee] px-3 sm:px-5">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#f1f1f1] sm:flex">
                   <MessageCircle className="h-5 w-5" aria-hidden />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="truncate text-[21px] font-semibold tracking-[-0.01em]">
+                  <h2 className="truncate text-[17px] font-semibold tracking-[-0.01em] sm:text-[21px]">
                     {activeSession?.title ?? "New workspace chat"}
                   </h2>
-                  <p className="truncate text-[13px] text-muted-foreground">
+                  <p className="truncate text-[12px] text-muted-foreground sm:text-[13px]">
                     {activeWorkspace?.name} - memory, web retrieval, document citations
                   </p>
                 </div>
               </div>
-              <div className="hidden shrink-0 items-center gap-2 text-[13px] text-muted-foreground xl:flex">
-                <Badge variant="secondary">Active</Badge>
-                <Badge variant="outline">Private workspace</Badge>
+              <div className="flex shrink-0 items-center gap-2 text-[13px] text-muted-foreground">
+                <div className="hidden items-center gap-2 xl:flex">
+                  <Badge variant="secondary">Active</Badge>
+                  <Badge variant="outline">Private workspace</Badge>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 xl:hidden"
+                  aria-label="Open activity and sources"
+                  onClick={() => setIsMobileToolsOpen(true)}
+                >
+                  <PanelRight className="h-4 w-4" aria-hidden />
+                </Button>
               </div>
             </header>
 
             <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px] overflow-hidden">
               <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
                 {error ? (
-                  <Card className="mx-6 mt-4 flex items-start gap-3 border-[#f0d8b8] bg-[#fff8ed] p-3 text-sm shadow-none">
+                  <Card className="mx-3 mt-3 flex items-start gap-3 border-[#f0d8b8] bg-[#fff8ed] p-3 text-sm shadow-none sm:mx-6 sm:mt-4">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#a15c00]" aria-hidden />
                     <p className="leading-6 text-muted-foreground">{error}</p>
                   </Card>
@@ -725,53 +824,95 @@ export function ChatWorkbench() {
                 )}
               </div>
 
-              <aside className="hidden h-full min-h-0 min-w-0 border-l border-[#eeeeee] bg-white p-4 xl:block 2xl:p-5 overflow-hidden">
-                <Tabs defaultValue="activity" className="flex h-full flex-col">
-                  <TabsList className="grid w-full grid-cols-4 bg-[#f3f3f3]">
-                    <TabsTrigger value="activity">Activity</TabsTrigger>
-                    <TabsTrigger value="sources" className="gap-1.5">
-                      <Library className="h-3.5 w-3.5" aria-hidden />
-                      Sources
-                    </TabsTrigger>
-                    <TabsTrigger value="docs" className="gap-1.5">
-                      <FileText className="h-3.5 w-3.5" aria-hidden />
-                      Docs
-                    </TabsTrigger>
-                    <TabsTrigger value="usage" className="gap-1.5">
-                      <BarChart3 className="h-3.5 w-3.5" aria-hidden />
-                      Usage
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="activity" className="min-h-0 flex-1">
-                    <ReasoningPanel
-                      statuses={statuses}
-                      isStreaming={isStreaming}
-                      hasAnswerStarted={streamingAnswer.length > 0}
-                      hasError={Boolean(error)}
-                    />
-                  </TabsContent>
-                  <TabsContent value="sources" className="min-h-0 flex-1">
-                    <CitationsPanel citations={citations} />
-                  </TabsContent>
-                  <TabsContent value="docs" className="min-h-0 flex-1">
-                    <DocumentUpload
-                      documents={documents}
-                      disabled={!activeWorkspace}
-                      isUploading={isUploading}
-                      onFilesSelected={handleUploadDocuments}
-                      onRefresh={refreshDocuments}
-                    />
-                  </TabsContent>
-                  <TabsContent value="usage" className="min-h-0 flex-1">
-                    <UsagePanel usage={usage} />
-                  </TabsContent>
-                </Tabs>
+              <aside className="hidden h-full min-h-0 min-w-0 overflow-hidden border-l border-[#eeeeee] bg-white p-4 xl:block 2xl:p-5">
+                <SupportTabs
+                  statuses={statuses}
+                  isStreaming={isStreaming}
+                  hasAnswerStarted={streamingAnswer.length > 0}
+                  hasError={Boolean(error)}
+                  citations={citations}
+                  documents={documents}
+                  disabled={!activeWorkspace}
+                  isUploading={isUploading}
+                  usage={usage}
+                  onFilesSelected={handleUploadDocuments}
+                  onRefreshDocuments={refreshDocuments}
+                />
               </aside>
             </div>
           </section>
         </Card>
       </div>
     </main>
+    <Dialog open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
+      <DialogContent className="left-0 top-0 h-dvh w-[min(360px,calc(100vw-1rem))] max-w-none translate-x-0 translate-y-0 gap-0 rounded-none p-0">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Workspace navigation</DialogTitle>
+          <DialogDescription>Select a workspace or chat.</DialogDescription>
+        </DialogHeader>
+        <WorkspaceSidebar
+          className="[&>div:first-child]:pr-12"
+          workspaces={workspaces}
+          activeWorkspaceId={activeWorkspaceId}
+          sessions={visibleSessions}
+          activeChatId={activeSession?.id ?? ""}
+          isLoading={isLoading}
+          onSelectWorkspace={(workspaceId) => {
+            setIsMobileNavOpen(false);
+            selectWorkspace(workspaceId);
+          }}
+          onSelectChat={(chatId) => {
+            setIsMobileNavOpen(false);
+            selectChat(chatId);
+          }}
+          onCreateWorkspace={() => {
+            setIsMobileNavOpen(false);
+            openCreateWorkspaceDialog();
+          }}
+          onCreateChat={() => {
+            setIsMobileNavOpen(false);
+            openCreateChatDialog();
+          }}
+          onEditWorkspace={(workspace) => {
+            setIsMobileNavOpen(false);
+            openEditWorkspaceDialog(workspace);
+          }}
+          onDeleteWorkspace={(workspace) => {
+            setIsMobileNavOpen(false);
+            openDeleteWorkspaceDialog(workspace);
+          }}
+          onEditChat={(session) => {
+            setIsMobileNavOpen(false);
+            openEditChatDialog(session);
+          }}
+          onDeleteChat={(session) => {
+            setIsMobileNavOpen(false);
+            openDeleteChatDialog(session);
+          }}
+        />
+      </DialogContent>
+    </Dialog>
+    <Dialog open={isMobileToolsOpen} onOpenChange={setIsMobileToolsOpen}>
+      <DialogContent className="left-auto right-0 top-0 h-dvh w-[min(420px,calc(100vw-1rem))] max-w-none translate-x-0 translate-y-0 gap-0 rounded-none p-3 sm:p-4">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Activity and sources</DialogTitle>
+          <DialogDescription>Review reasoning status, sources, documents, and usage.</DialogDescription>
+        </DialogHeader>
+        <SupportTabs
+          statuses={statuses}
+          isStreaming={isStreaming}
+          hasAnswerStarted={streamingAnswer.length > 0}
+          hasError={Boolean(error)}
+          citations={citations}
+          documents={documents}
+          disabled={!activeWorkspace}
+          isUploading={isUploading}
+          usage={usage}
+          onFilesSelected={handleUploadDocuments}
+          onRefreshDocuments={refreshDocuments}
+        />
+      </DialogContent>
+    </Dialog>
     <Dialog
       open={createDialog !== null}
       onOpenChange={(open) => {

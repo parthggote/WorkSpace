@@ -27,7 +27,7 @@ export function ChatThread({ messages, streamingAnswer, isStreaming }: ChatThrea
 
   return (
     <ScrollArea className="flex-1 bg-white">
-      <div className={cn("min-h-full p-6", isEmpty && "grid place-items-center")}>
+      <div className={cn("min-h-full p-3 sm:p-6", isEmpty && "grid place-items-center")}>
         {isEmpty ? (
           <div className="flex flex-col items-center gap-4 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#eeeeee]">
@@ -36,22 +36,22 @@ export function ChatThread({ messages, streamingAnswer, isStreaming }: ChatThrea
             <p className="text-[18px] font-semibold">Your conversation will appear here</p>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-5">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 sm:gap-5">
             {messages.map((message) => (
               <article
                 key={message.id}
                 className={cn(
-                  "flex max-w-[86%] flex-col gap-2 rounded-xl border px-4 py-3",
+                  "flex max-w-[94%] flex-col gap-2 rounded-xl border px-3 py-3 sm:max-w-[86%] sm:px-4",
                   message.role === "user"
                     ? "ml-auto border-[#e1e1e1] bg-[#f4f4f4]"
                     : "mr-auto border-transparent bg-white",
                 )}
               >
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center justify-between gap-3">
                   <Badge variant={message.role === "user" ? "default" : "secondary"}>
                     {message.role === "user" ? "You" : "Assistant"}
                   </Badge>
-                  <time className="font-mono text-[11px] text-muted-foreground">
+                  <time className="shrink-0 font-mono text-[11px] text-muted-foreground">
                     {message.createdAt}
                   </time>
                 </div>
@@ -67,13 +67,13 @@ export function ChatThread({ messages, streamingAnswer, isStreaming }: ChatThrea
                             target="_blank"
                             rel="noopener noreferrer"
                             className={cn(
-                              "inline-flex items-center gap-1 rounded-md border border-[#e8e8e8] bg-[#f9f9f9] px-2 py-1 text-[11px] text-[#555]",
+                              "inline-flex max-w-full items-center gap-1 rounded-md border border-[#e8e8e8] bg-[#f9f9f9] px-2 py-1 text-[11px] text-[#555]",
                               citation.url ? "hover:bg-[#f0f0f0] transition-colors" : "cursor-default"
                             )}
                             onClick={(e) => !citation.url && e.preventDefault()}
                           >
                             <span className="font-semibold capitalize text-[#333]">{citation.source}</span>
-                            <span className="max-w-[150px] truncate">{citation.title}</span>
+                            <span className="max-w-[120px] truncate sm:max-w-[150px]">{citation.title}</span>
                           </a>
                         ))}
                       </div>
@@ -88,7 +88,7 @@ export function ChatThread({ messages, streamingAnswer, isStreaming }: ChatThrea
             ))}
 
             {hasPendingAssistant ? (
-              <article className="mr-auto flex max-w-[86%] flex-col gap-3 rounded-xl border border-[#eeeeee] bg-white px-4 py-3 shadow-sm">
+              <article className="mr-auto flex max-w-[94%] flex-col gap-3 rounded-xl border border-[#eeeeee] bg-white px-3 py-3 shadow-sm sm:max-w-[86%] sm:px-4">
                 <div className="flex items-center gap-2">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
                   <Badge variant="secondary">Assistant</Badge>

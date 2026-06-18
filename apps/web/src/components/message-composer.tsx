@@ -72,18 +72,18 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="shrink-0 border-t border-[#ededed] bg-white p-4">
-      <div className="mx-auto max-w-3xl rounded-[22px] border border-[#e1e1e1] bg-white p-3 shadow-[0_2px_14px_rgba(0,0,0,0.04)] transition-shadow focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.08)]">
+    <form onSubmit={handleSubmit} className="shrink-0 border-t border-[#ededed] bg-white p-2 sm:p-4">
+      <div className="mx-auto max-w-3xl rounded-[18px] border border-[#e1e1e1] bg-white p-2.5 shadow-[0_2px_14px_rgba(0,0,0,0.04)] transition-shadow focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.08)] sm:rounded-[22px] sm:p-3">
         {/* Attached files */}
         {attachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2 px-1">
+          <div className="mb-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto px-1">
             {attachments.map((attachment) => (
               <div
                 key={attachment.id}
                 className="group flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#f8f8f8] px-2.5 py-1.5 text-xs transition-colors hover:bg-[#f0f0f0]"
               >
                 {getFileIcon(attachment.type)}
-                <span className="max-w-[120px] truncate font-medium text-[#333]">
+                <span className="max-w-[96px] truncate font-medium text-[#333] sm:max-w-[120px]">
                   {attachment.name}
                 </span>
                 <span className="text-muted-foreground">{formatFileSize(attachment.size)}</span>
@@ -112,12 +112,12 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
               ? "Ask about the attached files or type a message..."
               : "Chat with your workspace..."
           }
-          className="min-h-16 resize-none border-0 px-1 text-[15px] shadow-none focus-visible:ring-0"
+          className="min-h-14 resize-none border-0 px-1 text-[15px] shadow-none focus-visible:ring-0 sm:min-h-16"
         />
 
         {/* Bottom bar with actions */}
-        <div className="mt-3 flex items-center justify-between">
-          <div className="flex items-center gap-1">
+        <div className="mt-2 flex items-end justify-between gap-2 sm:mt-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {/* Attach file button */}
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -189,19 +189,19 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
 
             {/* Active mode badges */}
             {(advancedSearch || forceWeb || attachments.length > 0) && (
-              <div className="ml-2 flex items-center gap-1.5">
+              <div className="ml-0 flex min-w-0 flex-wrap items-center gap-1.5 sm:ml-2">
                 {advancedSearch && (
-                  <Badge variant="secondary" className="gap-1 bg-violet-50 text-violet-700 text-[11px] px-2 py-0.5">
+                  <Badge variant="secondary" className="gap-1 bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">
                     <Sparkles className="h-3 w-3" /> Advanced
                   </Badge>
                 )}
                 {forceWeb && (
-                  <Badge variant="secondary" className="gap-1 bg-sky-50 text-sky-700 text-[11px] px-2 py-0.5">
+                  <Badge variant="secondary" className="gap-1 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">
                     <Globe className="h-3 w-3" /> Web
                   </Badge>
                 )}
                 {attachments.length > 0 && (
-                  <Badge variant="secondary" className="gap-1 bg-amber-50 text-amber-700 text-[11px] px-2 py-0.5">
+                  <Badge variant="secondary" className="gap-1 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
                     <Paperclip className="h-3 w-3" /> {attachments.length} file{attachments.length !== 1 ? "s" : ""}
                   </Badge>
                 )}
@@ -215,7 +215,7 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
             disabled={disabled || (message.trim().length === 0 && attachments.length === 0)}
             aria-label="Send message"
             size="icon"
-            className="h-10 w-10 rounded-full"
+            className="h-10 w-10 shrink-0 rounded-full"
           >
             <SendHorizontal className="h-4 w-4" aria-hidden />
           </Button>

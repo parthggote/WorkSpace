@@ -3,11 +3,13 @@
 Recommended deployment:
 
 - Frontend: Vercel
-- Backend: Render or Railway
+- Backend: Render
+- Background Worker: Render Celery worker
 - Database and Auth: Supabase
 - Redis: Upstash Redis
 - Search: Tavily Search API
 - LLM Gateway: OpenRouter
+- Embeddings: OpenAI-compatible remote embeddings through OpenAI or OpenRouter
 
 ## Environment Separation
 
@@ -36,11 +38,28 @@ TAVILY_SEARCH_DEPTH=basic
 LLM_API_KEY=
 LLM_BASE_URL=https://openrouter.ai/api/v1
 DEFAULT_MODEL=openai/gpt-4o-mini
-EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=768
+EMBEDDING_BATCH_SIZE=24
 RERANKER_MODEL=BAAI/bge-reranker-base
 ```
 
 Only `NEXT_PUBLIC_*` variables may be exposed to the browser.
+
+For OpenRouter embeddings, use the same OpenRouter key if desired:
+
+```env
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=your_openrouter_key
+EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
+EMBEDDING_MODEL=openai/text-embedding-3-small
+EMBEDDING_DIMENSIONS=768
+```
+
+`EMBEDDING_PROVIDER=openai` means the backend uses an OpenAI-compatible embeddings client; it does not require the provider to be direct OpenAI.
 
 ## Migration Order
 
@@ -56,7 +75,7 @@ Only `NEXT_PUBLIC_*` variables may be exposed to the browser.
 
 ## Redis and Celery-Style Workers
 
-For MVP, FastAPI background tasks can enqueue light work. For production-like deployment, run a worker process that consumes Redis-backed Celery queues:
+For production deployment, run a worker process that consumes Redis-backed Celery queues:
 
 - `embeddings`
 - `summaries`
@@ -64,6 +83,12 @@ For MVP, FastAPI background tasks can enqueue light work. For production-like de
 - `maintenance`
 
 The database `background_jobs` table provides durable audit status even when Redis is the broker.
+
+Render worker command should keep memory bounded:
+
+```bash
+python -m celery -A app.jobs.celery_app worker --loglevel=info --pool=solo --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=10
+```
 
 ## Secret Hygiene
 

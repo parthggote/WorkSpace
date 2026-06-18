@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import type { ChatSession, Workspace } from "@/lib/types";
 
 type WorkspaceSidebarProps = {
+  className?: string;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   sessions: ChatSession[];
@@ -21,6 +22,7 @@ type WorkspaceSidebarProps = {
 };
 
 export function WorkspaceSidebar({
+  className,
   workspaces,
   activeWorkspaceId,
   sessions,
@@ -38,7 +40,7 @@ export function WorkspaceSidebar({
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col border-r border-[#e6e6e6] bg-[#f4f4f4]">
+    <aside className={cn("flex h-full min-h-0 w-full flex-col border-r border-[#e6e6e6] bg-[#f4f4f4]", className)}>
       <div className="border-b border-[#e6e6e6] px-3 py-3">
         <div className="flex items-center justify-between gap-2 px-1">
           <div className="min-w-0">

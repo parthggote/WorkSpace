@@ -33,12 +33,13 @@ Required follow-up:
 
 ### Embeddings
 
-`apps/api/app/services/embeddings.py` includes a deterministic fallback vector when the local embedding model cannot load. This is useful for import tests, but retrieval quality depends on loading the configured BGE model.
+`apps/api/app/services/embeddings.py` uses an OpenAI-compatible remote embeddings client in production and keeps a deterministic fallback vector for tests or unconfigured local development. Retrieval quality depends on a valid `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, and 768-dimensional embedding model.
 
 Required follow-up:
 
-- Preload or health-check the embedding model at worker startup.
-- Fail document ingestion clearly if production embeddings cannot run.
+- Add a backend health check that verifies embedding provider configuration without echoing secrets.
+- Alert clearly when document ingestion falls back because the embedding provider is unavailable.
+- Keep `EMBEDDING_BATCH_SIZE` modest on Render workers to avoid large request payloads and memory spikes.
 
 ### Background jobs
 
@@ -59,4 +60,3 @@ Required follow-up:
 - Show document processing status from `GET /workspaces/{workspace_id}/documents`.
 - Associate document chunks with `documents`/`document_chunks` consistently across migrations and runtime writes.
 - Surface document citations in final answers.
-

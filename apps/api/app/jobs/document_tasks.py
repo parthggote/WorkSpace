@@ -40,6 +40,11 @@ def chunk_text(text: str, size: int = 2200, overlap: int = 250) -> list[str]:
     return chunks
 
 
+def iter_batches(items: list[str], batch_size: int) -> list[list[str]]:
+    size = max(batch_size, 1)
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
 @celery_app.task(name="documents.ingest")
 def ingest_document_task(document_id: str, workspace_id: str, path: str) -> dict:
     return asyncio.run(_ingest_document(document_id, workspace_id, path))
@@ -80,13 +85,17 @@ async def _ingest_document(document_id: str, workspace_id: str, path: str) -> di
             text = clean_text_for_postgres(extract_text(path))
             
         chunks = chunk_text(text)
+        vectors: list[list[float]] = []
+        for batch in iter_batches(chunks, settings.embedding_batch_size):
+            vectors.extend(embedding_service.embed_texts(batch))
+
         async with pool.acquire() as conn:
             async with conn.transaction():
                 for chunk_index, chunk in enumerate(chunks):
                     chunk = clean_text_for_postgres(chunk)
                     if not chunk:
                         continue
-                    vector = vector_literal(embedding_service.embed(chunk))
+                    vector = vector_literal(vectors[chunk_index])
                     chunk_row = await conn.fetchrow(
                         """
                         INSERT INTO document_chunks (workspace_id, document_id, chunk_index, content, token_count)

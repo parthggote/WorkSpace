@@ -35,6 +35,18 @@ services:
         value: openai/gpt-4o-mini
       - key: TAVILY_API_KEY
         sync: false
+      - key: EMBEDDING_PROVIDER
+        value: openai
+      - key: EMBEDDING_API_KEY
+        sync: false
+      - key: EMBEDDING_BASE_URL
+        value: https://api.openai.com/v1
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: EMBEDDING_DIMENSIONS
+        value: 768
+      - key: EMBEDDING_BATCH_SIZE
+        value: 24
 
   - type: web
     name: ai-workspace-worker
@@ -42,7 +54,7 @@ services:
     rootDir: apps/api
     plan: starter
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: sh -c "python -m http.server $PORT --bind 0.0.0.0 & python -m celery -A app.jobs.celery_app worker --loglevel=info --pool=solo --concurrency=1"
+    startCommand: sh -c "python -m http.server $PORT --bind 0.0.0.0 & python -m celery -A app.jobs.celery_app worker --loglevel=info --pool=solo --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=10"
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
@@ -69,3 +81,15 @@ services:
         value: openai/gpt-4o-mini
       - key: TAVILY_API_KEY
         sync: false
+      - key: EMBEDDING_PROVIDER
+        value: openai
+      - key: EMBEDDING_API_KEY
+        sync: false
+      - key: EMBEDDING_BASE_URL
+        value: https://api.openai.com/v1
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: EMBEDDING_DIMENSIONS
+        value: 768
+      - key: EMBEDDING_BATCH_SIZE
+        value: 24

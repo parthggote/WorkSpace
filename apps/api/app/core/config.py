@@ -32,7 +32,12 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     tavily_search_depth: str = "basic"
     max_web_search_results: int = 5
-    embedding_model: str = "BAAI/bge-base-en-v1.5"
+    embedding_provider: str = "openai"
+    embedding_api_key: str = ""
+    embedding_base_url: str = "https://api.openai.com/v1"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 768
+    embedding_batch_size: int = 24
     upload_dir: str = "uploads"
     max_upload_mb: int = 12
     langchain_verbose: bool = False
@@ -49,4 +54,6 @@ def get_settings() -> Settings:
         settings.supabase_jwks_url = ""
     if settings.supabase_service_role_key.startswith("your_"):
         settings.supabase_service_role_key = ""
+    if settings.embedding_api_key.startswith("your_"):
+        settings.embedding_api_key = ""
     return settings

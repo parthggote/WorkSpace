@@ -51,15 +51,18 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  if (!session && pathname !== '/login' && !pathname.startsWith('/auth/')) {
+  const isPublicRoute = pathname === '/' || pathname === '/login' || pathname.startsWith('/auth/')
+
+  if (!session && !isPublicRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  if (session && pathname === '/login') {
+  // If logged in, redirect away from login or landing page directly to workspace
+  if (session && (pathname === '/login' || pathname === '/')) {
     const url = request.nextUrl.clone()
-    url.pathname = '/'
+    url.pathname = '/workspace'
     return NextResponse.redirect(url)
   }
 

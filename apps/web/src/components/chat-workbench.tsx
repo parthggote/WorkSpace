@@ -56,9 +56,20 @@ import type {
   Workspace,
   WorkspaceDocument,
 } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { type User } from "@supabase/supabase-js";
 
 export function ChatWorkbench() {
   const { toast } = useToast();
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+    });
+  }, []);
+
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [visibleSessions, setVisibleSessions] = useState<ChatSession[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
@@ -595,13 +606,10 @@ export function ChatWorkbench() {
     <main className="grid h-dvh min-h-0 grid-rows-[64px_minmax(0,1fr)] overflow-hidden bg-[#f4f4f4] text-foreground">
       <header className="flex min-w-0 items-center justify-between gap-4 border-b border-[#ededed] bg-[#f4f4f4] px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-sm font-semibold text-white">
-            AI
-          </div>
-          <Button variant="ghost" className="h-9 min-w-0 gap-1 px-1 text-[15px] font-semibold">
-            Workspace AI
-            <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
-          </Button>
+          <a href="/" aria-label="Workspace home" className="flex items-center gap-2 mr-1">
+            <img src="/logo.svg" alt="Workspace Logo" className="w-8 h-8 object-contain" />
+            <span className="text-[16px] font-bold tracking-tight">Workspace</span>
+          </a>
           <span className="hidden text-muted-foreground sm:inline">/</span>
           <Button variant="ghost" className="hidden h-9 min-w-0 gap-1 px-1 text-[15px] font-semibold sm:inline-flex">
             {activeWorkspace?.name ?? "Workspace"}
@@ -613,11 +621,15 @@ export function ChatWorkbench() {
             type="button"
             variant="ghost"
             size="icon"
-            className="h-9 w-9 rounded-full bg-[#efefef] text-sm font-semibold hover:bg-[#e5e5e5]"
+            className="h-9 w-9 rounded-full bg-[#efefef] text-sm font-semibold hover:bg-[#e5e5e5] overflow-hidden"
             aria-label="Open user profile"
             onClick={() => setIsProfileDialogOpen(true)}
           >
-            U
+            {user?.user_metadata?.avatar_url ? (
+              <img src={user.user_metadata.avatar_url} alt={user?.user_metadata?.full_name || user?.email} className="w-full h-full object-cover" />
+            ) : (
+              (user?.user_metadata?.full_name || user?.email || "U").charAt(0).toUpperCase()
+            )}
           </Button>
         </div>
       </header>
@@ -934,6 +946,21 @@ export function ChatWorkbench() {
           </div>
         ) : (
           <div className="space-y-3">
+            {user && (
+              <div className="flex items-center gap-3 p-3 rounded-md border border-[#eeeeee] bg-[#f8f8f8] mb-4">
+                {user?.user_metadata?.avatar_url ? (
+                  <img src={user.user_metadata.avatar_url} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#efefef] font-semibold text-muted-foreground">
+                    {(user?.user_metadata?.full_name || user?.email || "U").charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm font-medium truncate">{user.user_metadata?.full_name || "User"}</span>
+                  <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                </div>
+              </div>
+            )}
             <Button
               type="button"
               variant="outline"

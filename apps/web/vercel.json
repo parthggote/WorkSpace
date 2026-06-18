@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "installCommand": "cd ../.. && npm ci",
+  "buildCommand": "cd ../.. && npm --workspace apps/web run build",
+  "devCommand": "cd ../.. && npm --workspace apps/web run dev"
+}

@@ -1,0 +1,71 @@
+services:
+  - type: web
+    name: ai-workspace-api
+    runtime: python
+    rootDir: apps/api
+    plan: starter
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.13
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: DEFAULT_MODEL
+        value: openai/gpt-4o-mini
+      - key: CHEAP_MODEL
+        value: openai/gpt-4o-mini
+      - key: TAVILY_API_KEY
+        sync: false
+
+  - type: worker
+    name: ai-workspace-worker
+    runtime: python
+    rootDir: apps/api
+    plan: starter
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: celery -A app.jobs.celery_app worker --loglevel=info
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.13
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: DEFAULT_MODEL
+        value: openai/gpt-4o-mini
+      - key: CHEAP_MODEL
+        value: openai/gpt-4o-mini
+      - key: TAVILY_API_KEY
+        sync: false

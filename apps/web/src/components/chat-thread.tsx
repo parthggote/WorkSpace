@@ -1,0 +1,104 @@
+import { MessageCircle } from "lucide-react";
+import { AnswerContent } from "@/components/answer-content";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import type { ChatMessage } from "@/lib/types";
+
+type ChatThreadProps = {
+  messages: ChatMessage[];
+  streamingAnswer: string;
+  isStreaming: boolean;
+};
+
+function AssistantSkeleton() {
+  return (
+    <div className="space-y-3" aria-label="Assistant response loading">
+      <div className="h-3 w-11/12 animate-pulse rounded-full bg-[#e8e8e8]" />
+      <div className="h-3 w-4/5 animate-pulse rounded-full bg-[#e8e8e8]" />
+      <div className="h-3 w-2/3 animate-pulse rounded-full bg-[#e8e8e8]" />
+    </div>
+  );
+}
+
+export function ChatThread({ messages, streamingAnswer, isStreaming }: ChatThreadProps) {
+  const hasPendingAssistant = isStreaming || Boolean(streamingAnswer);
+  const isEmpty = messages.length === 0 && !hasPendingAssistant;
+
+  return (
+    <ScrollArea className="flex-1 bg-white">
+      <div className={cn("min-h-full p-6", isEmpty && "grid place-items-center")}>
+        {isEmpty ? (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#eeeeee]">
+              <MessageCircle className="h-6 w-6" aria-hidden />
+            </div>
+            <p className="text-[18px] font-semibold">Your conversation will appear here</p>
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            {messages.map((message) => (
+              <article
+                key={message.id}
+                className={cn(
+                  "flex max-w-[86%] flex-col gap-2 rounded-xl border px-4 py-3",
+                  message.role === "user"
+                    ? "ml-auto border-[#e1e1e1] bg-[#f4f4f4]"
+                    : "mr-auto border-transparent bg-white",
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <Badge variant={message.role === "user" ? "default" : "secondary"}>
+                    {message.role === "user" ? "You" : "Assistant"}
+                  </Badge>
+                  <time className="font-mono text-[11px] text-muted-foreground">
+                    {message.createdAt}
+                  </time>
+                </div>
+                {message.role === "assistant" ? (
+                  <>
+                    <AnswerContent content={message.content} />
+                    {message.citations && message.citations.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2 border-t border-[#f0f0f0] pt-2">
+                        {message.citations.map((citation, idx) => (
+                          <a
+                            key={citation.message_id || citation.locator || citation.url || String(idx)}
+                            href={citation.url || "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-md border border-[#e8e8e8] bg-[#f9f9f9] px-2 py-1 text-[11px] text-[#555]",
+                              citation.url ? "hover:bg-[#f0f0f0] transition-colors" : "cursor-default"
+                            )}
+                            onClick={(e) => !citation.url && e.preventDefault()}
+                          >
+                            <span className="font-semibold capitalize text-[#333]">{citation.source}</span>
+                            <span className="max-w-[150px] truncate">{citation.title}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="whitespace-pre-wrap text-[14px] leading-6 text-[#202020]">
+                    {message.content}
+                  </p>
+                )}
+              </article>
+            ))}
+
+            {hasPendingAssistant ? (
+              <article className="mr-auto flex max-w-[86%] flex-col gap-3 rounded-xl border border-[#eeeeee] bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+                  <Badge variant="secondary">Assistant</Badge>
+                </div>
+                {streamingAnswer ? <AnswerContent content={streamingAnswer} /> : <AssistantSkeleton />}
+              </article>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}

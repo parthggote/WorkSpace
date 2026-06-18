@@ -1,0 +1,17 @@
+{
+  "name": "ai-workspace-chat",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "cd apps/api && uvicorn app.main:app --reload --port 8000",
+    "lint:web": "npm --workspace apps/web run lint",
+    "test:api": "cd apps/api && pytest",
+    "db:migrate": "cd apps/api && python -m app.db.migrations",
+    "worker": "cd apps/api && celery -A app.jobs.celery_app worker --loglevel=info"
+  },
+  "workspaces": [
+    "apps/web",
+    "packages/shared"
+  ]
+}

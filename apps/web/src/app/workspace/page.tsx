@@ -1,5 +1,5 @@
-import ChatLayout from "@/components/layout/chat-layout";
+import { ChatWorkbench } from "@/components/chat-workbench";
 
 export default function WorkspacePage() {
-  return <ChatLayout />;
+  return <ChatWorkbench />;
 }

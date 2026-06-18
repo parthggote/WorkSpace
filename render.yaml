@@ -36,13 +36,13 @@ services:
       - key: TAVILY_API_KEY
         sync: false
 
-  - type: worker
+  - type: web
     name: ai-workspace-worker
     runtime: python
     rootDir: apps/api
     plan: starter
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: celery -A app.jobs.celery_app worker --loglevel=info
+    startCommand: sh -c "python -m http.server $PORT --bind 0.0.0.0 & python -m celery -A app.jobs.celery_app worker --loglevel=info --pool=solo --concurrency=1"
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION

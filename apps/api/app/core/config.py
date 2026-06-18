@@ -9,7 +9,10 @@ load_dotenv()
 class Settings(BaseSettings):
     app_name: str = "AI Workspace Chat"
     api_prefix: str = "/api"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_origins: list[str] = Field(default_factory=lambda: [
+        "http://localhost:3000", 
+        "https://work-space-web.vercel.app"
+    ])
 
     database_url: str = ""
     supabase_url: str = ""

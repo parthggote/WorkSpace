@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { motion, useAnimation } from "framer-motion"
+import { motion, useAnimation, type Variants } from "framer-motion"
 import * as THREE from "three"
 import Link from "next/link"
 
@@ -22,7 +22,7 @@ export default function HeroWithNavbar() {
     controls.start("visible")
   }, [controls])
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -33,7 +33,7 @@ export default function HeroWithNavbar() {
     },
   }
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 30 },
     visible: {
       opacity: 1,
@@ -45,7 +45,7 @@ export default function HeroWithNavbar() {
     },
   }
 
-  const navVariants = {
+  const navVariants: Variants = {
     hidden: { opacity: 0, y: -20 },
     visible: {
       opacity: 1,

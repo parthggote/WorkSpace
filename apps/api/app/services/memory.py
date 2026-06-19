@@ -21,7 +21,14 @@ async def store_message_embedding(pool, embedding_service: EmbeddingService, mes
     )
 
 
-async def retrieve_memory(pool, embedding_service: EmbeddingService, workspace_id: str, query: str, limit: int = 5) -> list[dict]:
+async def retrieve_memory(
+    pool,
+    embedding_service: EmbeddingService,
+    workspace_id: str,
+    query: str,
+    limit: int = 5,
+    exclude_chat_id: str | None = None,
+) -> list[dict]:
     vector = vector_literal(embedding_service.embed(query))
     rows = await pool.fetch(
         """
@@ -37,11 +44,14 @@ async def retrieve_memory(pool, embedding_service: EmbeddingService, workspace_i
         LEFT JOIN messages m ON m.id = me.message_id
         LEFT JOIN chat_sessions cs ON cs.id = me.chat_id
         WHERE me.workspace_id = $2
+          AND me.source_type = 'chat'
+          AND ($3::uuid IS NULL OR me.chat_id IS DISTINCT FROM $3::uuid)
         ORDER BY me.embedding <=> $1::vector
         LIMIT 30
         """,
         vector,
         workspace_id,
+        exclude_chat_id,
     )
     candidates = [
         {

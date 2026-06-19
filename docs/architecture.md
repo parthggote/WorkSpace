@@ -66,7 +66,8 @@ Avoid recursive tool loops for the MVP because they increase cost, latency, and 
 
 ## Retrieval Sources
 
-- Chat messages and chat summaries use `source_type='message'` or `source_type='summary'`.
+- Chat messages and chat summaries use `source_type='chat'` or `source_type='summary'`.
+- Cross-chat memory first scores candidate chats by summary embedding, message-embedding fallback, title match, lexical overlap, and recency, then fetches recent messages from the selected chats.
 - Uploaded documents use `source_type='document'`.
 - Live web sources are stored separately in `web_sources` and can be attached to messages for citations.
 

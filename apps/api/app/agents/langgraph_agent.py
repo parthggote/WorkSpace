@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 from app.core.config import Settings
 from app.services.embeddings import EmbeddingService
 from app.services.llm_gateway import LLMGateway
-from app.services.memory import retrieve_memory
+from app.services.chat_memory import retrieve_workspace_chat_context
 from app.services.prompt_builder import build_citations, build_messages
 from app.services.reranker import AdvancedReranker, RetrievalCandidate
 from app.services.redis_client import RedisService
@@ -135,13 +135,18 @@ async def node_retrieve_memory(
 ) -> dict:
     """Retrieve relevant memory chunks from workspace conversations."""
     query = state.get("search_query") or state["query"]
-    chunks = await retrieve_memory(
-        pool, embedding_service, state["workspace_id"], query
+    chunks = await retrieve_workspace_chat_context(
+        pool,
+        embedding_service,
+        state["workspace_id"],
+        state["chat_id"],
+        query,
     )
+    reason = f"Retrieved {len(chunks)} cross-chat context chunks from workspace chat summaries."
     return {
         "memory_chunks": chunks,
         "status_messages": [
-            f"Retrieved {len(chunks)} memory chunks.",
+            reason,
             summarize_sources("workspace memory", chunks, "chat_title"),
         ],
     }

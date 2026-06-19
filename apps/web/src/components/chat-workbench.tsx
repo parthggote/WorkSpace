@@ -5,6 +5,7 @@ import {
   BarChart3,
   ChevronDown,
   FileText,
+  GripVertical,
   Library,
   LogOut,
   Menu,
@@ -12,7 +13,7 @@ import {
   PanelRight,
   Settings,
 } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -53,6 +54,7 @@ import type {
   ChatMessage,
   ChatAttachment,
   ChatSession,
+  FileAttachment,
   Citation,
   StreamStatus,
   UsageSummary,
@@ -158,7 +160,8 @@ export function ChatWorkbench() {
   const [streamingAnswer, setStreamingAnswer] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-const [isUploading, setIsUploading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [supportPanelWidth, setSupportPanelWidth] = useState(360);
   const [createDialog, setCreateDialog] = useState<"workspace" | "chat" | null>(null);
   const [manageDialog, setManageDialog] = useState<
     | { action: "edit" | "delete"; type: "workspace"; item: Workspace }
@@ -529,101 +532,165 @@ const [isUploading, setIsUploading] = useState(false);
     ]);
   }
 
-  function fileToChatAttachment(file: File): ChatAttachment {
-    return {
-      id: crypto.randomUUID(),
-      name: file.name,
-      size: file.size,
-      type: file.type || file.name.split(".").pop() || "file",
-      status: "queued",
-    };
+  function resizeSupportPanel(nextWidth: number) {
+    setSupportPanelWidth(Math.min(560, Math.max(300, nextWidth)));
   }
 
-  function updateMessageAttachments(
-    messageId: string,
-    updateAttachment: (attachment: ChatAttachment) => ChatAttachment,
-  ) {
-    setMessages((currentMessages) =>
-      currentMessages.map((message) =>
-        message.id === messageId
-          ? {
-              ...message,
-              attachments: message.attachments?.map(updateAttachment),
-            }
-          : message,
-      ),
-    );
-  }
+  function startSupportPanelResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = supportPanelWidth;
 
-  function mergeDocumentStatusIntoAttachments(
-    attachments: ChatAttachment[],
-    nextDocuments: WorkspaceDocument[],
-  ): ChatAttachment[] {
-    return attachments.map((attachment) => {
-      const document = nextDocuments.find((item) => item.id === attachment.documentId);
-      if (!document) {
-        return attachment;
-      }
-      const status: ChatAttachment["status"] =
-        document.status === "ready"
-          ? "ready"
-          : document.status === "failed"
-            ? "failed"
-            : "processing";
-      return {
-        ...attachment,
-        status,
-        error: document.error,
-      };
-    });
-  }
-
-  async function waitForDocumentsReady(
-    workspaceId: string,
-    documentIds: string[],
-    messageId: string,
-  ) {
-    const deadline = Date.now() + documentPollTimeoutMs;
-    let latestDocuments: WorkspaceDocument[] = [];
-
-    while (Date.now() < deadline) {
-      latestDocuments = await listDocuments(workspaceId);
-      setDocuments(latestDocuments);
-      documentIdsRef.current = latestDocuments.map((document) => document.id);
-      updateMessageAttachments(messageId, (attachment) =>
-        mergeDocumentStatusIntoAttachments([attachment], latestDocuments)[0],
-      );
-
-      const relevantDocuments = latestDocuments.filter((document) => documentIds.includes(document.id));
-      const readyIds = relevantDocuments
-        .filter((document) => document.status === "ready")
-        .map((document) => document.id);
-      const allSettled =
-        relevantDocuments.length === documentIds.length &&
-        relevantDocuments.every((document) => document.status === "ready" || document.status === "failed");
-
-      if (allSettled) {
-        return { readyIds, documents: latestDocuments, timedOut: false };
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+    function handlePointerMove(moveEvent: PointerEvent) {
+      resizeSupportPanel(startWidth - (moveEvent.clientX - startX));
     }
 
-    return {
-      readyIds: latestDocuments
-        .filter((document) => documentIds.includes(document.id) && document.status === "ready")
-        .map((document) => document.id),
-      documents: latestDocuments,
-      timedOut: true,
-    };
+    function handlePointerUp() {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    }
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
   }
 
-  async function handleSubmit(message: string, files: File[] = [], options: { advancedSearch: boolean; forceWeb: boolean; skipWebPrompt?: boolean } = { advancedSearch: false, forceWeb: false }) {
+  async function prepareComposerAttachments(
+    attachments: FileAttachment[],
+    onUpdate: (attachmentId: string, patch: Partial<FileAttachment>) => void,
+  ) {
+    if (!activeWorkspace) {
+      attachments.forEach((attachment) =>
+        onUpdate(attachment.id, { status: "failed", error: "Create or select a workspace first." }),
+      );
+      return;
+    }
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      attachments.forEach((attachment) => onUpdate(attachment.id, { status: "uploading" }));
+      const uploadResults = await Promise.all(
+        attachments.map((attachment) => uploadDocument(activeWorkspace.id, attachment.file)),
+      );
+      const uploaded = attachments
+        .map((attachment, index) => {
+          const result = uploadResults[index];
+          if (!result.id) {
+            onUpdate(attachment.id, {
+              status: "failed",
+              error: result.error ?? "Upload failed.",
+            });
+            return null;
+          }
+          onUpdate(attachment.id, {
+            status: "processing",
+            documentId: result.id,
+            error: null,
+          });
+          return { attachmentId: attachment.id, documentId: result.id };
+        })
+        .filter((item): item is { attachmentId: string; documentId: string } => Boolean(item));
+
+      if (uploaded.length === 0) {
+        return;
+      }
+
+      appendStatus("status", `${uploaded.length} document${uploaded.length === 1 ? "" : "s"} queued for ingestion.`);
+      const deadline = Date.now() + documentPollTimeoutMs;
+
+      while (Date.now() < deadline) {
+        const nextDocuments = await listDocuments(activeWorkspace.id);
+        setDocuments(nextDocuments);
+        documentIdsRef.current = nextDocuments.map((document) => document.id);
+
+        let allSettled = true;
+        uploaded.forEach(({ attachmentId, documentId }) => {
+          const document = nextDocuments.find((item) => item.id === documentId);
+          if (!document || (document.status !== "ready" && document.status !== "failed")) {
+            allSettled = false;
+            onUpdate(attachmentId, { status: "processing" });
+            return;
+          }
+          onUpdate(attachmentId, {
+            status: document.status === "ready" ? "ready" : "failed",
+            error: document.error,
+          });
+        });
+
+        if (allSettled) {
+          const selectedDocuments = nextDocuments.filter((document) =>
+            uploaded.some((item) => item.documentId === document.id),
+          );
+          const failedCount = selectedDocuments.filter((document) => document.status === "failed").length;
+          if (failedCount > 0) {
+            appendStatus(
+              "status",
+              `${failedCount} document${failedCount === 1 ? "" : "s"} failed during ingestion. Remove failed files before sending.`,
+            );
+            toast({
+              title: "Document ingestion failed",
+              description: "Remove the failed attachment or upload it again before chatting.",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          appendStatus("status", "Uploaded documents are ready for chat.");
+          toast({
+            title: "Documents ready",
+            description: "You can now ask questions using the attached files.",
+          });
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      uploaded.forEach(({ attachmentId }) =>
+        onUpdate(attachmentId, {
+          status: "failed",
+          error: "Document processing timed out. Try again after it appears ready in Docs.",
+        }),
+      );
+      toast({
+        title: "Document still processing",
+        description: "The document is not ready yet. Try again once it appears as ready in Docs.",
+        variant: "destructive",
+      });
+    } catch (uploadError) {
+      attachments.forEach((attachment) =>
+        onUpdate(attachment.id, {
+          status: "failed",
+          error: uploadError instanceof Error ? uploadError.message : "Upload failed.",
+        }),
+      );
+      reportError("Could not prepare attachment", "Unable to upload or process one or more attachments.", uploadError);
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleSubmit(message: string, attachments: FileAttachment[] = [], options: { advancedSearch: boolean; forceWeb: boolean; skipWebPrompt?: boolean } = { advancedSearch: false, forceWeb: false }) {
     if (!activeWorkspace || !activeSession) {
         return;
     }
 
-    const pendingAttachments = files.map(fileToChatAttachment);
+    const readyAttachments = attachments.filter(
+      (attachment) => attachment.status === "ready" && attachment.documentId,
+    );
+    const pendingAttachments: ChatAttachment[] = readyAttachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      status: "ready",
+      documentId: attachment.documentId,
+    }));
     let userMessageId = "";
 
     // Only add a new message bubble to the UI if we aren't resubmitting from a prompt
@@ -662,77 +729,13 @@ const [isUploading, setIsUploading] = useState(false);
     let finalAnswer = "";
     let finalCitations: Citation[] = [];
 
-    // Upload attached files first. If files are attached, keep this turn focused on them.
-    let uploadedDocIds: string[] = documents
+    let uploadedDocIds: string[] = readyAttachments.length > 0
+      ? readyAttachments.map((attachment) => attachment.documentId as string)
+      : documents
       .filter((document) => document.status === "ready")
       .map((document) => document.id);
-    if (files.length > 0) {
-      try {
-        setIsUploading(true);
-        appendStatus("status", `Uploading ${files.length} file${files.length === 1 ? "" : "s"}...`);
-        if (userMessageId) {
-          updateMessageAttachments(userMessageId, (attachment) => ({
-            ...attachment,
-            status: "uploading",
-          }));
-        }
-        const uploadResults = await Promise.all(
-          files.map((file) => uploadDocument(activeWorkspace.id, file))
-        );
-        const nextAttachments = pendingAttachments.map((attachment, index) => ({
-          ...attachment,
-          documentId: uploadResults[index]?.id,
-          status: uploadResults[index]?.id ? "processing" as const : "failed" as const,
-          error: uploadResults[index]?.id ? null : "Upload failed",
-        }));
-        if (userMessageId) {
-          setMessages((currentMessages) =>
-            currentMessages.map((currentMessage) =>
-              currentMessage.id === userMessageId
-                ? { ...currentMessage, attachments: nextAttachments }
-                : currentMessage,
-            ),
-          );
-        }
-        const newIds = nextAttachments
-          .filter((attachment) => attachment.documentId)
-          .map((attachment) => attachment.documentId as string);
-        appendStatus("status", `Queued ${files.length} file${files.length === 1 ? "" : "s"} for document context.`);
-        if (newIds.length > 0 && userMessageId) {
-          appendStatus("status", "Waiting for documents to finish processing...");
-          const result = await waitForDocumentsReady(activeWorkspace.id, newIds, userMessageId);
-          uploadedDocIds = result.readyIds;
-          if (result.timedOut) {
-            appendStatus("status", "Documents are still processing. They will be available once marked ready.");
-            toast({
-              title: "Documents still processing",
-              description: "Try again once the document chip says Ready.",
-              variant: "destructive",
-            });
-          } else if (uploadedDocIds.length > 0) {
-            appendStatus("status", `${uploadedDocIds.length} document${uploadedDocIds.length === 1 ? "" : "s"} ready for this chat.`);
-          }
-        } else {
-          await refreshDocuments();
-        }
-      } catch (uploadError) {
-        appendStatus("status", "Some files failed to upload.");
-        if (userMessageId) {
-          updateMessageAttachments(userMessageId, (attachment) => ({
-            ...attachment,
-            status: "failed",
-            error: "Upload failed",
-          }));
-        }
-        reportError("Could not upload attachment", "Unable to upload one or more attachments.", uploadError);
-        setIsStreaming(false);
-        return;
-      } finally {
-        setIsUploading(false);
-      }
-    }
 
-    if (files.length > 0 && uploadedDocIds.length === 0) {
+    if (attachments.length > 0 && uploadedDocIds.length === 0) {
       setIsStreaming(false);
       appendStatus("status", "No uploaded documents are ready yet.");
       return;
@@ -920,7 +923,10 @@ const [isUploading, setIsUploading] = useState(false);
               </div>
             </header>
 
-            <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px] overflow-hidden">
+            <div
+              className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)] overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--support-panel-width)]"
+              style={{ "--support-panel-width": `${supportPanelWidth}px` } as CSSProperties}
+            >
               <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
                 {error ? (
                   <Card className="mx-3 mt-3 flex items-start gap-3 border-[#f0d8b8] bg-[#fff8ed] p-3 text-sm shadow-none sm:mx-6 sm:mt-4">
@@ -944,7 +950,11 @@ const [isUploading, setIsUploading] = useState(false);
                       streamingAnswer={streamingAnswer}
                       isStreaming={isStreaming}
                     />
-                    <MessageComposer disabled={isStreaming} onSubmit={handleSubmit} />
+                    <MessageComposer
+                      disabled={isStreaming}
+                      onSubmit={handleSubmit}
+                      onPrepareAttachments={prepareComposerAttachments}
+                    />
                   </>
                 ) : (
                   <div className="grid flex-1 place-items-center p-6 text-center">
@@ -972,7 +982,32 @@ const [isUploading, setIsUploading] = useState(false);
                 )}
               </div>
 
-              <aside className="hidden h-full min-h-0 min-w-0 overflow-hidden border-l border-[#eeeeee] bg-white p-4 xl:block 2xl:p-5">
+              <aside className="relative hidden h-full min-h-0 min-w-0 overflow-hidden border-l border-[#eeeeee] bg-white p-4 xl:block 2xl:p-5">
+                <div
+                  role="separator"
+                  aria-label="Resize activity panel"
+                  aria-orientation="vertical"
+                  aria-valuemin={300}
+                  aria-valuemax={560}
+                  aria-valuenow={supportPanelWidth}
+                  tabIndex={0}
+                  onPointerDown={startSupportPanelResize}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowLeft") {
+                      event.preventDefault();
+                      resizeSupportPanel(supportPanelWidth + 24);
+                    }
+                    if (event.key === "ArrowRight") {
+                      event.preventDefault();
+                      resizeSupportPanel(supportPanelWidth - 24);
+                    }
+                  }}
+                  className="absolute inset-y-0 left-0 z-10 flex w-4 -translate-x-1/2 cursor-col-resize items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="flex h-12 w-5 items-center justify-center rounded-full border border-[#dedede] bg-white text-muted-foreground shadow-sm transition-colors hover:bg-[#f5f5f5]">
+                    <GripVertical className="h-4 w-4" aria-hidden />
+                  </span>
+                </div>
                 <SupportTabs
                   statuses={statuses}
                   isStreaming={isStreaming}

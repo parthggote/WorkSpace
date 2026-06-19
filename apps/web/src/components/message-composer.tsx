@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Globe, Paperclip, SendHorizontal, Sparkles, X } from "lucide-react";
+import { CheckCircle2, FileText, Globe, Loader2, Paperclip, SendHorizontal, Sparkles, X, XCircle } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,7 +10,11 @@ import type { FileAttachment } from "@/lib/types";
 
 type MessageComposerProps = {
   disabled?: boolean;
-  onSubmit: (message: string, files: File[], options: { advancedSearch: boolean; forceWeb: boolean }) => void;
+  onSubmit: (message: string, attachments: FileAttachment[], options: { advancedSearch: boolean; forceWeb: boolean }) => void;
+  onPrepareAttachments?: (
+    attachments: FileAttachment[],
+    onUpdate: (attachmentId: string, patch: Partial<FileAttachment>) => void,
+  ) => Promise<void>;
 };
 
 function formatFileSize(bytes: number): string {
@@ -23,14 +27,39 @@ function getFileIcon(type: string) {
   return <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />;
 }
 
-export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
+function getStatusIcon(attachment: FileAttachment) {
+  if (attachment.status === "ready") {
+    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />;
+  }
+  if (attachment.status === "failed") {
+    return <XCircle className="h-3.5 w-3.5 text-destructive" aria-hidden />;
+  }
+  return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />;
+}
+
+function getStatusLabel(attachment: FileAttachment) {
+  if (attachment.status === "uploading") return "Uploading";
+  if (attachment.status === "processing" || attachment.status === "queued") return "Processing";
+  if (attachment.status === "ready") return "Ready";
+  return "Failed";
+}
+
+export function MessageComposer({ disabled, onSubmit, onPrepareAttachments }: MessageComposerProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [advancedSearch, setAdvancedSearch] = useState(false);
   const [forceWeb, setForceWeb] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleFiles(fileList: FileList | null) {
+  function updateAttachment(attachmentId: string, patch: Partial<FileAttachment>) {
+    setAttachments((prev) =>
+      prev.map((attachment) =>
+        attachment.id === attachmentId ? { ...attachment, ...patch } : attachment,
+      ),
+    );
+  }
+
+  async function handleFiles(fileList: FileList | null) {
     const newFiles = Array.from(fileList ?? []);
     if (newFiles.length === 0) return;
 
@@ -40,9 +69,14 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
       name: file.name,
       size: file.size,
       type: file.type || file.name.split(".").pop() || "file",
+      status: "queued",
     }));
     setAttachments((prev) => [...prev, ...newAttachments]);
     if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (onPrepareAttachments) {
+      await onPrepareAttachments(newAttachments, updateAttachment);
+    }
   }
 
   function removeAttachment(id: string) {
@@ -52,10 +86,10 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedMessage = message.trim();
-    if ((!trimmedMessage && attachments.length === 0) || disabled) return;
+    const hasPendingAttachments = attachments.some((attachment) => attachment.status !== "ready");
+    if ((!trimmedMessage && attachments.length === 0) || disabled || hasPendingAttachments) return;
 
-    const files = attachments.map((a) => a.file);
-    onSubmit(trimmedMessage || "Please analyze the attached documents.", files, {
+    onSubmit(trimmedMessage || "Please analyze the attached documents.", attachments, {
       advancedSearch,
       forceWeb,
     });
@@ -71,6 +105,14 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
     }
   }
 
+  const hasPendingAttachments = attachments.some((attachment) => attachment.status !== "ready");
+  const hasFailedAttachments = attachments.some((attachment) => attachment.status === "failed");
+  const canSend =
+    !disabled &&
+    !hasPendingAttachments &&
+    !hasFailedAttachments &&
+    (message.trim().length > 0 || attachments.length > 0);
+
   return (
     <form onSubmit={handleSubmit} className="shrink-0 border-t border-[#ededed] bg-white p-2 sm:p-4">
       <div className="mx-auto max-w-3xl rounded-[18px] border border-[#e1e1e1] bg-white p-2.5 shadow-[0_2px_14px_rgba(0,0,0,0.04)] transition-shadow focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.08)] sm:rounded-[22px] sm:p-3">
@@ -80,13 +122,24 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
             {attachments.map((attachment) => (
               <div
                 key={attachment.id}
-                className="group flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#f8f8f8] px-2.5 py-1.5 text-xs transition-colors hover:bg-[#f0f0f0]"
+                className={`group flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                  attachment.status === "failed"
+                    ? "border-[#f0d0d0] bg-[#fff7f7]"
+                    : attachment.status === "ready"
+                      ? "border-[#d7eadc] bg-[#f7fff8]"
+                      : "border-[#e5e5e5] bg-[#f8f8f8]"
+                }`}
+                title={attachment.error ?? attachment.name}
               >
                 {getFileIcon(attachment.type)}
                 <span className="max-w-[96px] truncate font-medium text-[#333] sm:max-w-[120px]">
                   {attachment.name}
                 </span>
                 <span className="text-muted-foreground">{formatFileSize(attachment.size)}</span>
+                <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                  {getStatusIcon(attachment)}
+                  <span className="hidden sm:inline">{getStatusLabel(attachment)}</span>
+                </span>
                 <button
                   type="button"
                   onClick={() => removeAttachment(attachment.id)}
@@ -109,7 +162,9 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
           rows={3}
           placeholder={
             attachments.length > 0
-              ? "Ask about the attached files or type a message..."
+              ? hasPendingAttachments
+                ? "Document is being prepared for chat..."
+                : "Ask about the attached files or type a message..."
               : "Chat with your workspace..."
           }
           className="min-h-14 resize-none border-0 px-1 text-[15px] shadow-none focus-visible:ring-0 sm:min-h-16"
@@ -128,7 +183,7 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
                     size="icon"
                     className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={disabled}
+                    disabled={disabled || hasPendingAttachments}
                   >
                     <Paperclip className="h-[18px] w-[18px]" aria-hidden />
                   </Button>
@@ -151,7 +206,7 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                     onClick={() => setAdvancedSearch((prev) => !prev)}
-                    disabled={disabled}
+                    disabled={disabled || hasPendingAttachments}
                   >
                     <Sparkles className="h-[18px] w-[18px]" aria-hidden />
                   </Button>
@@ -176,7 +231,7 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                     onClick={() => setForceWeb((prev) => !prev)}
-                    disabled={disabled}
+                    disabled={disabled || hasPendingAttachments}
                   >
                     <Globe className="h-[18px] w-[18px]" aria-hidden />
                   </Button>
@@ -212,7 +267,7 @@ export function MessageComposer({ disabled, onSubmit }: MessageComposerProps) {
           {/* Send button */}
           <Button
             type="submit"
-            disabled={disabled || (message.trim().length === 0 && attachments.length === 0)}
+            disabled={!canSend}
             aria-label="Send message"
             size="icon"
             className="h-10 w-10 shrink-0 rounded-full"

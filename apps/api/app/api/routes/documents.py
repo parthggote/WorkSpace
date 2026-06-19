@@ -28,12 +28,21 @@ async def list_documents(workspace_id: str, user: CurrentUser = Depends(get_curr
 
 import httpx
 
+SUPPORTED_DOCUMENT_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".log"}
+
 @router.post("")
 async def upload_document(workspace_id: str, file: UploadFile = File(...), user: CurrentUser = Depends(get_current_user), pool=Depends(get_pool)):
     await assert_workspace_owner(pool, user.id, workspace_id)
     settings = get_settings()
     
     suffix = Path(file.filename or "upload.bin").suffix.lower()
+    if suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
+        return {
+            "ok": False,
+            "error": f"unsupported_file_type:{suffix or 'unknown'}",
+            "supported_types": sorted(SUPPORTED_DOCUMENT_SUFFIXES),
+        }
+
     stored_name = f"{uuid4()}{suffix}"
     
     content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)

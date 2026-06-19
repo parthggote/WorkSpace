@@ -75,7 +75,7 @@ export function ReasoningPanel({
                     })}
                   </time>
                 </div>
-                <p className="mt-2 text-[13px] leading-5 text-[#202020]">{status.content}</p>
+                <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#202020]">{status.content}</p>
               </div>
             ))
           ) : (

@@ -135,7 +135,10 @@ async def node_retrieve_memory(
     )
     return {
         "memory_chunks": chunks,
-        "status_messages": [f"Retrieved {len(chunks)} memory chunks."],
+        "status_messages": [
+            f"Retrieved {len(chunks)} memory chunks.",
+            summarize_sources("workspace memory", chunks, "chat_title"),
+        ],
     }
 
 
@@ -193,13 +196,43 @@ async def node_retrieve_documents(
         )
     return {
         "document_chunks": chunks,
-        "status_messages": [f"Retrieved {len(chunks)} document chunks."],
+        "status_messages": [
+            f"Retrieved {len(chunks)} document chunks.",
+            summarize_sources("document context", chunks, "filename"),
+        ],
     }
 
 import re
 import asyncio
+from urllib.parse import urlparse
 
 URL_REGEX = re.compile(r'https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)')
+
+
+def source_host(url: str | None) -> str:
+    if not url:
+        return "source"
+    host = urlparse(url).netloc.replace("www.", "")
+    return host or "source"
+
+
+def format_score(value) -> str:
+    try:
+        return f"{float(value) * 100:.0f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def summarize_sources(label: str, items: list[dict], title_key: str, score_key: str = "score", limit: int = 5) -> str:
+    if not items:
+        return f"No {label} cleared the relevance threshold."
+    lines = []
+    for index, item in enumerate(items[:limit], start=1):
+        title = item.get(title_key) or item.get("title") or item.get("filename") or source_host(item.get("url"))
+        host = f" ({source_host(item.get('url'))})" if item.get("url") else ""
+        score = format_score(item.get(score_key))
+        lines.append(f"{index}. {title}{host}, score {score}")
+    return f"Selected {label}:\n" + "\n".join(lines)
 
 async def node_search_web(
     state: AgentState, settings: Settings, redis_service: RedisService | None
@@ -239,7 +272,10 @@ async def node_search_web(
 
     return {
         "web_sources": sources,
-        "status_messages": [f"Collected {len(sources)} web sources (including {len(urls)} direct links)."],
+        "status_messages": [
+            f"Collected {len(sources)} web sources (including {len(urls)} direct links).",
+            summarize_sources("web sources", sources, "title"),
+        ],
     }
 
 def node_rerank_merge(state: AgentState) -> dict:
@@ -295,7 +331,8 @@ def node_rerank_merge(state: AgentState) -> dict:
     return {
         "merged_candidates": merged,
         "status_messages": [
-            f"Reranked {len(candidates)} candidates → top {len(merged)}."
+            f"Reranked {len(candidates)} candidates into top {len(merged)} evidence candidates.",
+            summarize_sources("reranked evidence", merged, "title", "rerank_score"),
         ],
     }
 
@@ -386,6 +423,17 @@ async def run_advanced_search(
     memory_for_prompt = [m for m in merged if m.get("source_type") == "message"]
     doc_for_prompt = [m for m in merged if m.get("source_type") == "document"]
     web_for_prompt = [m for m in merged if m.get("source_type") == "web"]
+    evidence_parts = []
+    if memory_for_prompt:
+        evidence_parts.append(f"{len(memory_for_prompt)} memory")
+    if doc_for_prompt:
+        evidence_parts.append(f"{len(doc_for_prompt)} document")
+    if web_for_prompt:
+        evidence_parts.append(f"{len(web_for_prompt)} web")
+    yield (
+        "reasoning_summary",
+        "Answer context mix: " + ", ".join(evidence_parts) if evidence_parts else "Answer context mix: current chat only.",
+    )
 
     prompt = build_messages(
         state["query"],

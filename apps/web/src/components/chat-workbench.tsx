@@ -51,6 +51,7 @@ import {
 } from "@/lib/api/workspace-data";
 import type {
   ChatMessage,
+  ChatAttachment,
   ChatSession,
   Citation,
   StreamStatus,
@@ -157,7 +158,7 @@ export function ChatWorkbench() {
   const [streamingAnswer, setStreamingAnswer] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
+const [isUploading, setIsUploading] = useState(false);
   const [createDialog, setCreateDialog] = useState<"workspace" | "chat" | null>(null);
   const [manageDialog, setManageDialog] = useState<
     | { action: "edit" | "delete"; type: "workspace"; item: Workspace }
@@ -174,6 +175,7 @@ export function ChatWorkbench() {
   const [isManaging, setIsManaging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const documentIdsRef = useRef<string[]>([]);
+  const documentPollTimeoutMs = 45_000;
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
   const activeSession =
@@ -527,18 +529,112 @@ export function ChatWorkbench() {
     ]);
   }
 
+  function fileToChatAttachment(file: File): ChatAttachment {
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      size: file.size,
+      type: file.type || file.name.split(".").pop() || "file",
+      status: "queued",
+    };
+  }
+
+  function updateMessageAttachments(
+    messageId: string,
+    updateAttachment: (attachment: ChatAttachment) => ChatAttachment,
+  ) {
+    setMessages((currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              attachments: message.attachments?.map(updateAttachment),
+            }
+          : message,
+      ),
+    );
+  }
+
+  function mergeDocumentStatusIntoAttachments(
+    attachments: ChatAttachment[],
+    nextDocuments: WorkspaceDocument[],
+  ): ChatAttachment[] {
+    return attachments.map((attachment) => {
+      const document = nextDocuments.find((item) => item.id === attachment.documentId);
+      if (!document) {
+        return attachment;
+      }
+      const status: ChatAttachment["status"] =
+        document.status === "ready"
+          ? "ready"
+          : document.status === "failed"
+            ? "failed"
+            : "processing";
+      return {
+        ...attachment,
+        status,
+        error: document.error,
+      };
+    });
+  }
+
+  async function waitForDocumentsReady(
+    workspaceId: string,
+    documentIds: string[],
+    messageId: string,
+  ) {
+    const deadline = Date.now() + documentPollTimeoutMs;
+    let latestDocuments: WorkspaceDocument[] = [];
+
+    while (Date.now() < deadline) {
+      latestDocuments = await listDocuments(workspaceId);
+      setDocuments(latestDocuments);
+      documentIdsRef.current = latestDocuments.map((document) => document.id);
+      updateMessageAttachments(messageId, (attachment) =>
+        mergeDocumentStatusIntoAttachments([attachment], latestDocuments)[0],
+      );
+
+      const relevantDocuments = latestDocuments.filter((document) => documentIds.includes(document.id));
+      const readyIds = relevantDocuments
+        .filter((document) => document.status === "ready")
+        .map((document) => document.id);
+      const allSettled =
+        relevantDocuments.length === documentIds.length &&
+        relevantDocuments.every((document) => document.status === "ready" || document.status === "failed");
+
+      if (allSettled) {
+        return { readyIds, documents: latestDocuments, timedOut: false };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    return {
+      readyIds: latestDocuments
+        .filter((document) => documentIds.includes(document.id) && document.status === "ready")
+        .map((document) => document.id),
+      documents: latestDocuments,
+      timedOut: true,
+    };
+  }
+
   async function handleSubmit(message: string, files: File[] = [], options: { advancedSearch: boolean; forceWeb: boolean; skipWebPrompt?: boolean } = { advancedSearch: false, forceWeb: false }) {
     if (!activeWorkspace || !activeSession) {
         return;
     }
 
+    const pendingAttachments = files.map(fileToChatAttachment);
+    let userMessageId = "";
+
     // Only add a new message bubble to the UI if we aren't resubmitting from a prompt
     if (!options.skipWebPrompt && !pendingWebSearch) {
+      userMessageId = crypto.randomUUID();
       const userMessage: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: userMessageId,
         chatId: activeSession.id,
         role: "user",
         content: message,
+        attachments: pendingAttachments,
         createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
@@ -574,21 +670,72 @@ export function ChatWorkbench() {
       try {
         setIsUploading(true);
         appendStatus("status", `Uploading ${files.length} file${files.length === 1 ? "" : "s"}...`);
+        if (userMessageId) {
+          updateMessageAttachments(userMessageId, (attachment) => ({
+            ...attachment,
+            status: "uploading",
+          }));
+        }
         const uploadResults = await Promise.all(
           files.map((file) => uploadDocument(activeWorkspace.id, file))
         );
-        const newIds = uploadResults
-          .filter((r) => r.id)
-          .map((r) => r.id as string);
-        uploadedDocIds = newIds;
+        const nextAttachments = pendingAttachments.map((attachment, index) => ({
+          ...attachment,
+          documentId: uploadResults[index]?.id,
+          status: uploadResults[index]?.id ? "processing" as const : "failed" as const,
+          error: uploadResults[index]?.id ? null : "Upload failed",
+        }));
+        if (userMessageId) {
+          setMessages((currentMessages) =>
+            currentMessages.map((currentMessage) =>
+              currentMessage.id === userMessageId
+                ? { ...currentMessage, attachments: nextAttachments }
+                : currentMessage,
+            ),
+          );
+        }
+        const newIds = nextAttachments
+          .filter((attachment) => attachment.documentId)
+          .map((attachment) => attachment.documentId as string);
         appendStatus("status", `Queued ${files.length} file${files.length === 1 ? "" : "s"} for document context.`);
-        await refreshDocuments();
+        if (newIds.length > 0 && userMessageId) {
+          appendStatus("status", "Waiting for documents to finish processing...");
+          const result = await waitForDocumentsReady(activeWorkspace.id, newIds, userMessageId);
+          uploadedDocIds = result.readyIds;
+          if (result.timedOut) {
+            appendStatus("status", "Documents are still processing. They will be available once marked ready.");
+            toast({
+              title: "Documents still processing",
+              description: "Try again once the document chip says Ready.",
+              variant: "destructive",
+            });
+          } else if (uploadedDocIds.length > 0) {
+            appendStatus("status", `${uploadedDocIds.length} document${uploadedDocIds.length === 1 ? "" : "s"} ready for this chat.`);
+          }
+        } else {
+          await refreshDocuments();
+        }
       } catch (uploadError) {
         appendStatus("status", "Some files failed to upload.");
+        if (userMessageId) {
+          updateMessageAttachments(userMessageId, (attachment) => ({
+            ...attachment,
+            status: "failed",
+            error: "Upload failed",
+          }));
+        }
         reportError("Could not upload attachment", "Unable to upload one or more attachments.", uploadError);
+        setIsStreaming(false);
+        return;
       } finally {
         setIsUploading(false);
       }
+    }
+
+    if (files.length > 0 && uploadedDocIds.length === 0) {
+      setIsStreaming(false);
+      appendStatus("status", "No uploaded documents are ready yet.");
+      return;
     }
 
     try {
@@ -685,15 +832,16 @@ export function ChatWorkbench() {
             type="button"
             variant="ghost"
             size="icon"
-            className="h-9 w-9 shrink-0 md:hidden"
+            className="-ml-1 h-10 w-10 shrink-0 md:hidden"
             aria-label="Open workspace navigation"
+            aria-expanded={isMobileNavOpen}
             onClick={() => setIsMobileNavOpen(true)}
           >
             <Menu className="h-5 w-5" aria-hidden />
           </Button>
           <a href="/" aria-label="Workspace home" className="mr-1 flex min-w-0 items-center gap-2">
             <img src="/logo.svg" alt="Workspace Logo" className="h-8 w-8 shrink-0 object-contain" />
-            <span className="truncate text-[16px] font-bold tracking-tight">Workspace</span>
+            <span className="truncate text-[16px] font-bold tracking-tight max-[380px]:hidden">Workspace</span>
           </a>
           <span className="hidden text-muted-foreground sm:inline">/</span>
           <Button variant="ghost" className="hidden h-9 min-w-0 gap-1 px-1 text-[15px] font-semibold sm:inline-flex">
@@ -845,13 +993,13 @@ export function ChatWorkbench() {
       </div>
     </main>
     <Dialog open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
-      <DialogContent className="left-0 top-0 h-dvh w-[min(360px,calc(100vw-1rem))] max-w-none translate-x-0 translate-y-0 gap-0 rounded-none p-0">
+      <DialogContent className="left-0 top-0 h-dvh w-full max-w-[380px] translate-x-0 translate-y-0 gap-0 rounded-none border-r border-[#e0e0e0] p-0 shadow-2xl max-[420px]:max-w-none [&>button]:right-3 [&>button]:top-3 [&>button]:z-20 [&>button]:rounded-full [&>button]:bg-white/90 [&>button]:p-2 [&>button]:shadow-sm">
         <DialogHeader className="sr-only">
           <DialogTitle>Workspace navigation</DialogTitle>
           <DialogDescription>Select a workspace or chat.</DialogDescription>
         </DialogHeader>
         <WorkspaceSidebar
-          className="[&>div:first-child]:pr-12"
+          className="border-r-0 [&>div:first-child]:pt-12"
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
           sessions={visibleSessions}

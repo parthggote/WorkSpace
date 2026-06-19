@@ -1,9 +1,9 @@
-import { MessageCircle } from "lucide-react";
+import { CheckCircle2, FileText, Loader2, MessageCircle, XCircle } from "lucide-react";
 import { AnswerContent } from "@/components/answer-content";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatAttachment, ChatMessage } from "@/lib/types";
 
 type ChatThreadProps = {
   messages: ChatMessage[];
@@ -17,6 +17,57 @@ function AssistantSkeleton() {
       <div className="h-3 w-11/12 animate-pulse rounded-full bg-[#e8e8e8]" />
       <div className="h-3 w-4/5 animate-pulse rounded-full bg-[#e8e8e8]" />
       <div className="h-3 w-2/3 animate-pulse rounded-full bg-[#e8e8e8]" />
+    </div>
+  );
+}
+
+function attachmentLabel(attachment: ChatAttachment) {
+  if (attachment.status === "uploading") return "Uploading";
+  if (attachment.status === "processing" || attachment.status === "queued") return "Processing";
+  if (attachment.status === "ready") return "Ready";
+  return "Failed";
+}
+
+function AttachmentStatusIcon({ attachment }: { attachment: ChatAttachment }) {
+  if (attachment.status === "ready") {
+    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />;
+  }
+  if (attachment.status === "failed") {
+    return <XCircle className="h-3.5 w-3.5 text-destructive" aria-hidden />;
+  }
+  return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />;
+}
+
+function MessageAttachments({ attachments }: { attachments?: ChatAttachment[] }) {
+  if (!attachments?.length) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1 flex flex-wrap gap-2">
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className={cn(
+            "flex max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs",
+            attachment.status === "failed"
+              ? "border-[#f0d0d0] bg-[#fff7f7]"
+              : attachment.status === "ready"
+                ? "border-[#d7eadc] bg-[#f7fff8]"
+                : "border-[#e5e5e5] bg-[#fafafa]",
+          )}
+          title={attachment.error ?? attachment.name}
+        >
+          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="max-w-[140px] truncate font-medium text-[#202020] sm:max-w-[180px]">
+            {attachment.name}
+          </span>
+          <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+            <AttachmentStatusIcon attachment={attachment} />
+            {attachmentLabel(attachment)}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -80,9 +131,12 @@ export function ChatThread({ messages, streamingAnswer, isStreaming }: ChatThrea
                     )}
                   </>
                 ) : (
-                  <p className="whitespace-pre-wrap text-[14px] leading-6 text-[#202020]">
-                    {message.content}
-                  </p>
+                  <>
+                    <p className="whitespace-pre-wrap text-[14px] leading-6 text-[#202020]">
+                      {message.content}
+                    </p>
+                    <MessageAttachments attachments={message.attachments} />
+                  </>
                 )}
               </article>
             ))}

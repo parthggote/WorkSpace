@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from urllib.parse import urlparse
 
 from app.core.auth import CurrentUser, assert_chat_owner, get_current_user
 from app.core.config import get_settings
@@ -14,6 +15,65 @@ from app.services.streaming import sse_event
 from app.services.web_retrieval import WebRetrievalService
 
 router = APIRouter(prefix="/chat", tags=["streaming"])
+
+
+def source_host(url: str | None) -> str:
+    if not url:
+        return "source"
+    host = urlparse(url).netloc.replace("www.", "")
+    return host or "source"
+
+
+def format_score(value) -> str:
+    try:
+        return f"{float(value) * 100:.0f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def summarize_web_sources(sources: list[dict], limit: int = 5) -> str:
+    if not sources:
+        return "No live web sources were selected."
+    lines = []
+    for index, source in enumerate(sources[:limit], start=1):
+        title = source.get("title") or source_host(source.get("url"))
+        host = source_host(source.get("url"))
+        score = format_score(source.get("score"))
+        lines.append(f"{index}. {title} ({host}, relevance {score})")
+    return "Selected web sources:\n" + "\n".join(lines)
+
+
+def summarize_document_chunks(chunks: list[dict], limit: int = 5) -> str:
+    if not chunks:
+        return "No uploaded document chunks cleared the relevance threshold."
+    lines = []
+    for index, chunk in enumerate(chunks[:limit], start=1):
+        filename = chunk.get("filename") or "uploaded document"
+        score = format_score(chunk.get("score"))
+        lines.append(f"{index}. {filename} (match {score})")
+    return "Selected document context:\n" + "\n".join(lines)
+
+
+def summarize_memory_chunks(chunks: list[dict], limit: int = 5) -> str:
+    if not chunks:
+        return "No prior workspace messages cleared the relevance threshold."
+    lines = []
+    for index, chunk in enumerate(chunks[:limit], start=1):
+        title = chunk.get("chat_title") or "previous chat"
+        score = format_score(chunk.get("score") or chunk.get("rerank_score"))
+        lines.append(f"{index}. {title} (match {score})")
+    return "Selected workspace memory:\n" + "\n".join(lines)
+
+
+def evidence_mix(memory_chunks: list[dict], web_sources: list[dict], document_chunks: list[dict]) -> str:
+    parts = []
+    if memory_chunks:
+        parts.append(f"{len(memory_chunks)} memory chunk{'s' if len(memory_chunks) != 1 else ''}")
+    if document_chunks:
+        parts.append(f"{len(document_chunks)} document chunk{'s' if len(document_chunks) != 1 else ''}")
+    if web_sources:
+        parts.append(f"{len(web_sources)} web source{'s' if len(web_sources) != 1 else ''}")
+    return "Answer will be grounded in " + ", ".join(parts) + "." if parts else "Answer will use the current chat only."
 
 
 def usage_provider(settings) -> str:
@@ -200,11 +260,15 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
             yield sse_event("status", {"content": "Optimizing search query..."})
             from app.agents.langgraph_agent import rewrite_query
             search_query = await rewrite_query(payload.message, history_list, settings)
-            yield sse_event("reasoning_summary", {"content": f"Optimized query: \"{search_query}\""})
+            yield sse_event("reasoning_summary", {"content": f"Search query used for retrieval: \"{search_query}\""})
 
         exhaustive_list = wants_exhaustive_list(payload.message)
+        if exhaustive_list:
+            yield sse_event("reasoning_summary", {"content": "Detected an exhaustive-list request, so workspace memory is skipped to prioritize live/comprehensive sources."})
         memory_chunks = [] if exhaustive_list else await retrieve_memory(pool, embeddings, payload.workspace_id, search_query)
         yield sse_event("reasoning_summary", {"content": f"Found {len(memory_chunks)} relevant memory candidates."})
+        if memory_chunks:
+            yield sse_event("reasoning_summary", {"content": summarize_memory_chunks(memory_chunks)})
 
         # Retrieve document context
         document_chunks = []
@@ -212,16 +276,20 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
             yield sse_event("status", {"content": "Searching uploaded documents..."})
             document_chunks = await retrieve_document_chunks(pool, embeddings, payload.workspace_id, search_query, payload.document_ids)
             yield sse_event("reasoning_summary", {"content": f"Found {len(document_chunks)} relevant document chunks."})
+            yield sse_event("reasoning_summary", {"content": summarize_document_chunks(document_chunks)})
 
         web_sources = []
         if needs_web(payload.message, payload.force_web):
             yield sse_event("status", {"content": "Fetching live web sources..."})
             web_sources = await web.advanced_search(search_query) if exhaustive_list else await web.retrieve(search_query)
             yield sse_event("reasoning_summary", {"content": f"Collected {len(web_sources)} live web sources."})
+            yield sse_event("reasoning_summary", {"content": summarize_web_sources(web_sources)})
 
         prompt = build_messages(payload.message, history_list, memory_chunks, web_sources, document_chunks)
         citations = build_citations(memory_chunks, web_sources, document_chunks)
         yield sse_event("citations", [citation.model_dump() for citation in citations])
+        yield sse_event("reasoning_summary", {"content": evidence_mix(memory_chunks, web_sources, document_chunks)})
+        yield sse_event("reasoning_summary", {"content": f"Prepared {len(citations)} citation candidate{'s' if len(citations) != 1 else ''} for the answer."})
         yield sse_event("status", {"content": "Generating final answer..."})
 
         final_text = []

@@ -22,6 +22,7 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   citations?: Citation[];
+  attachments?: ChatAttachment[];
 };
 
 export type Citation = {
@@ -75,6 +76,16 @@ export type FileAttachment = {
   name: string;
   size: number;
   type: string;
+};
+
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  status: "queued" | "uploading" | "processing" | "ready" | "failed";
+  documentId?: string;
+  error?: string | null;
 };
 
 export type ChatStreamEvent =

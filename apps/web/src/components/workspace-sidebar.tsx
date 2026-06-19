@@ -70,7 +70,7 @@ export function WorkspaceSidebar({
               <div
                 key={workspace.id}
                 className={cn(
-                  "group flex items-center gap-1 rounded-md",
+                  "group flex min-w-0 items-center gap-1 rounded-md",
                   isActive && "bg-[#dedede] hover:bg-[#dedede]",
                 )}
               >
@@ -85,7 +85,7 @@ export function WorkspaceSidebar({
                   >
                     {workspace.icon.slice(0, 2)}
                   </span>
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-medium">{workspace.name}</span>
                     <span className="block truncate text-[12px] text-muted-foreground">
                       {workspace.description}
@@ -154,9 +154,9 @@ export function WorkspaceSidebar({
                     <button
                       type="button"
                       onClick={() => onSelectChat(session.id)}
-                      className="flex min-w-0 flex-1 items-start gap-3 rounded-md px-3 py-3 text-left"
+                      className="flex min-w-0 flex-1 items-start gap-2 rounded-md px-2.5 py-3 text-left sm:gap-3 sm:px-3"
                     >
-                      <MessageCircle className="h-4 w-4" aria-hidden />
+                      <MessageCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-medium">
                           {session.title}

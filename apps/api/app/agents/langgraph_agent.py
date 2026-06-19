@@ -9,11 +9,16 @@ from typing import Any, TypedDict
 from app.core.config import Settings
 from app.services.embeddings import EmbeddingService
 from app.services.llm_gateway import LLMGateway
-from app.services.memory import retrieve_memory, vector_literal
+from app.services.memory import retrieve_memory
 from app.services.prompt_builder import build_citations, build_messages
 from app.services.reranker import AdvancedReranker, RetrievalCandidate
 from app.services.redis_client import RedisService
 from app.services.web_retrieval import WebRetrievalService
+from app.services.document_retrieval import (
+    is_document_focused_query,
+    is_document_summary_query,
+    retrieve_document_chunks,
+)
 
 
 WEB_TRIGGER_TERMS = ["today", "latest", "current", "news", "price", "2026", "web", "search", "find online"]
@@ -151,49 +156,15 @@ async def node_retrieve_documents(
         return {"document_chunks": [], "status_messages": ["No documents to search."]}
 
     query = state.get("search_query") or state["query"]
-    query_vector = vector_literal(embedding_service.embed(query))
-    rows = await pool.fetch(
-        """
-        SELECT
-            me.content_chunk,
-            me.document_id,
-            me.source_type,
-            d.filename,
-            1 - (me.embedding <=> $1::vector) AS similarity
-        FROM message_embeddings me
-        LEFT JOIN documents d ON d.id = me.document_id
-        WHERE me.workspace_id = $2
-          AND me.source_type = 'document'
-          AND me.document_id = ANY($3::uuid[])
-        ORDER BY me.embedding <=> $1::vector
-        LIMIT 20
-        """,
-        query_vector,
+    chunks = await retrieve_document_chunks(
+        pool,
+        embedding_service,
         state["workspace_id"],
+        query,
         document_ids,
+        limit=12 if is_document_summary_query(state["query"], document_ids) else 20,
+        force_ordered_context=is_document_summary_query(state["query"], document_ids),
     )
-    chunks = [
-        {
-            "content": row["content_chunk"],
-            "document_id": str(row["document_id"]) if row["document_id"] else None,
-            "source_type": "document",
-            "filename": row["filename"],
-            "score": float(row["similarity"] or 0),
-        }
-        for row in rows
-        if row["similarity"] is None or float(row["similarity"]) >= 0.45
-    ]
-    if not chunks:
-        from app.services.document_fallback import retrieve_document_chunks_fallback
-        chunks = await retrieve_document_chunks_fallback(
-            pool,
-            embedding_service,
-            state["workspace_id"],
-            query,
-            document_ids,
-            limit=20,
-            min_score=0.45
-        )
     return {
         "document_chunks": chunks,
         "status_messages": [
@@ -376,19 +347,26 @@ async def run_advanced_search(
         yield ("reasoning_summary", msg)
 
     # Rewrite query based on context if history exists
+    document_focused = is_document_focused_query(query, document_ids)
     search_query = query
-    if history:
+    if history and not document_focused:
         yield ("status", "Optimizing search query based on chat context...")
         search_query = await rewrite_query(query, history, settings)
         state["search_query"] = search_query
         yield ("reasoning_summary", f"Optimized query: \"{search_query}\"")
+    elif document_focused:
+        state["search_query"] = search_query
+        yield ("reasoning_summary", "Attached-document request detected; memory-based query rewriting skipped.")
 
     # Step 2: Parallel retrieval
     yield ("status", "Running parallel retrieval...")
     retrieval_tasks = []
-    retrieval_tasks.append(
-        node_retrieve_memory(state, pool, embedding_service)
-    )
+    if document_focused:
+        yield ("reasoning_summary", "Workspace memory skipped so the answer is grounded in the attached document.")
+    else:
+        retrieval_tasks.append(
+            node_retrieve_memory(state, pool, embedding_service)
+        )
     if state["has_documents"]:
         retrieval_tasks.append(
             node_retrieve_documents(state, pool, embedding_service)
@@ -413,10 +391,14 @@ async def run_advanced_search(
 
     # Step 3: Rerank and merge
     yield ("status", "Reranking and merging results...")
-    merge_result = node_rerank_merge(state)
-    state.update(merge_result)
-    for msg in merge_result.get("status_messages", []):
-        yield ("reasoning_summary", msg)
+    if document_focused and state.get("document_chunks"):
+        state["merged_candidates"] = state["document_chunks"]
+        yield ("reasoning_summary", f"Using {len(state['document_chunks'])} attached-document chunks as the answer context.")
+    else:
+        merge_result = node_rerank_merge(state)
+        state.update(merge_result)
+        for msg in merge_result.get("status_messages", []):
+            yield ("reasoning_summary", msg)
 
     # Step 4: Build context and citations
     merged = state.get("merged_candidates", [])

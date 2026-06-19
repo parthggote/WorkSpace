@@ -8,11 +8,16 @@ from app.db.session import get_pool
 from app.schemas.chat import ChatStreamRequest
 from app.services.embeddings import get_embedding_service
 from app.services.llm_gateway import LLMGateway
-from app.services.memory import retrieve_memory, store_message_embedding, vector_literal
+from app.services.memory import retrieve_memory, store_message_embedding
 from app.services.prompt_builder import build_citations, build_messages, wants_exhaustive_list
 from app.services.redis_client import RedisService
 from app.services.streaming import sse_event
 from app.services.web_retrieval import WebRetrievalService
+from app.services.document_retrieval import (
+    is_document_focused_query,
+    is_document_summary_query,
+    retrieve_document_chunks,
+)
 
 router = APIRouter(prefix="/chat", tags=["streaming"])
 
@@ -118,51 +123,6 @@ def needs_web(query: str, force_web: bool) -> bool:
     return force_web or wants_exhaustive_list(query)
 
 
-async def retrieve_document_chunks(pool, embedding_service, workspace_id: str, query: str, document_ids: list[str]) -> list[dict]:
-    """Retrieve relevant chunks from uploaded documents via pgvector similarity."""
-    if not document_ids:
-        return []
-    query_vector = vector_literal(embedding_service.embed(query))
-    rows = await pool.fetch(
-        """
-        SELECT
-            me.content_chunk,
-            me.document_id,
-            me.source_type,
-            d.filename,
-            1 - (me.embedding <=> $1::vector) AS similarity
-        FROM message_embeddings me
-        LEFT JOIN documents d ON d.id = me.document_id
-        WHERE me.workspace_id = $2
-          AND me.source_type = 'document'
-          AND me.document_id = ANY($3::uuid[])
-        ORDER BY me.embedding <=> $1::vector
-        LIMIT 10
-        """,
-        query_vector,
-        workspace_id,
-        document_ids,
-    )
-    res = [
-        {
-            "content": row["content_chunk"],
-            "document_id": str(row["document_id"]) if row["document_id"] else None,
-            "source_type": "document",
-            "filename": row["filename"],
-            "score": float(row["similarity"] or 0),
-        }
-        for row in rows
-        if row["similarity"] is None or float(row["similarity"]) >= 0.40
-    ]
-    if not res:
-        from app.services.document_fallback import retrieve_document_chunks_fallback
-        res = await retrieve_document_chunks_fallback(
-            pool, embedding_service, workspace_id, query, document_ids, limit=10, min_score=0.40
-        )
-    return res
-
-
-
 @router.post("/stream")
 async def stream_chat(payload: ChatStreamRequest, request: Request, user: CurrentUser = Depends(get_current_user), pool=Depends(get_pool)):
     await assert_chat_owner(pool, user.id, payload.workspace_id, payload.chat_id)
@@ -255,17 +215,25 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
         history_list = [dict(row) for row in history_rows]
 
         yield sse_event("status", {"content": "Checking previous workspace conversations..."})
+        document_focused = is_document_focused_query(payload.message, payload.document_ids)
+        document_summary = is_document_summary_query(payload.message, payload.document_ids)
         search_query = payload.message
-        if history_list:
+        if history_list and not document_focused:
             yield sse_event("status", {"content": "Optimizing search query..."})
             from app.agents.langgraph_agent import rewrite_query
             search_query = await rewrite_query(payload.message, history_list, settings)
             yield sse_event("reasoning_summary", {"content": f"Search query used for retrieval: \"{search_query}\""})
+        elif document_focused:
+            yield sse_event("reasoning_summary", {"content": "Attached-document request detected; using the current prompt for document retrieval instead of memory-based rewriting."})
 
         exhaustive_list = wants_exhaustive_list(payload.message)
         if exhaustive_list:
             yield sse_event("reasoning_summary", {"content": "Detected an exhaustive-list request, so workspace memory is skipped to prioritize live/comprehensive sources."})
-        memory_chunks = [] if exhaustive_list else await retrieve_memory(pool, embeddings, payload.workspace_id, search_query)
+        if document_focused:
+            memory_chunks = []
+            yield sse_event("reasoning_summary", {"content": "Workspace memory skipped so the answer is grounded in the attached document."})
+        else:
+            memory_chunks = [] if exhaustive_list else await retrieve_memory(pool, embeddings, payload.workspace_id, search_query)
         yield sse_event("reasoning_summary", {"content": f"Found {len(memory_chunks)} relevant memory candidates."})
         if memory_chunks:
             yield sse_event("reasoning_summary", {"content": summarize_memory_chunks(memory_chunks)})
@@ -274,7 +242,15 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
         document_chunks = []
         if payload.document_ids:
             yield sse_event("status", {"content": "Searching uploaded documents..."})
-            document_chunks = await retrieve_document_chunks(pool, embeddings, payload.workspace_id, search_query, payload.document_ids)
+            document_chunks = await retrieve_document_chunks(
+                pool,
+                embeddings,
+                payload.workspace_id,
+                search_query,
+                payload.document_ids,
+                limit=12 if document_summary else 10,
+                force_ordered_context=document_summary,
+            )
             yield sse_event("reasoning_summary", {"content": f"Found {len(document_chunks)} relevant document chunks."})
             yield sse_event("reasoning_summary", {"content": summarize_document_chunks(document_chunks)})
 

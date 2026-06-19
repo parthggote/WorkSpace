@@ -8,7 +8,8 @@ from app.db.session import get_pool
 from app.schemas.chat import ChatStreamRequest
 from app.services.embeddings import get_embedding_service
 from app.services.llm_gateway import LLMGateway
-from app.services.memory import retrieve_memory, store_message_embedding
+from app.services.chat_memory import refresh_chat_memory_summary, retrieve_workspace_chat_context
+from app.services.memory import store_message_embedding
 from app.services.prompt_builder import build_citations, build_messages, wants_exhaustive_list
 from app.services.redis_client import RedisService
 from app.services.streaming import sse_event
@@ -188,6 +189,7 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
                     "Advanced search agent response.",
                 )
                 await store_message_embedding(pool, embeddings, str(assistant_row["id"]), payload.workspace_id, payload.chat_id, assistant_content)
+                await refresh_chat_memory_summary(pool, embeddings, payload.workspace_id, payload.chat_id)
                 await pool.execute("UPDATE chat_sessions SET updated_at = now() WHERE id = $1", payload.chat_id)
 
         return StreamingResponse(advanced_event_generator(), media_type="text/event-stream")
@@ -233,7 +235,15 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
             memory_chunks = []
             yield sse_event("reasoning_summary", {"content": "Workspace memory skipped so the answer is grounded in the attached document."})
         else:
-            memory_chunks = [] if exhaustive_list else await retrieve_memory(pool, embeddings, payload.workspace_id, search_query)
+            memory_chunks = [] if exhaustive_list else await retrieve_workspace_chat_context(
+                pool,
+                embeddings,
+                payload.workspace_id,
+                payload.chat_id,
+                payload.message,
+            )
+            if memory_chunks:
+                yield sse_event("reasoning_summary", {"content": "Selected cross-chat context from workspace chat summaries and recent messages."})
         yield sse_event("reasoning_summary", {"content": f"Found {len(memory_chunks)} relevant memory candidates."})
         if memory_chunks:
             yield sse_event("reasoning_summary", {"content": summarize_memory_chunks(memory_chunks)})
@@ -289,6 +299,7 @@ async def stream_chat(payload: ChatStreamRequest, request: Request, user: Curren
             f"Used {len(memory_chunks)} memory chunks, {len(document_chunks)} document chunks, and {len(web_sources)} web sources.",
         )
         await store_message_embedding(pool, embeddings, str(assistant_row["id"]), payload.workspace_id, payload.chat_id, assistant_content)
+        await refresh_chat_memory_summary(pool, embeddings, payload.workspace_id, payload.chat_id)
         await pool.execute("UPDATE chat_sessions SET updated_at = now() WHERE id = $1", payload.chat_id)
         yield sse_event("done", {"ok": True})
 
